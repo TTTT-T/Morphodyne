@@ -17,7 +17,6 @@ namespace Morphodyne.Core
             Guid id,
             long simulationTick,
             EventKind kind,
-            string fact,
             EntityId? subjectEntityId = null,
             Guid? causedByEventId = null)
         {
@@ -34,7 +33,6 @@ namespace Morphodyne.Core
 
             SimulationTick = simulationTick;
             Kind = kind;
-            Fact = Guard.NonBlank(fact, nameof(fact));
             SubjectEntityId = subjectEntityId;
             CausedByEventId = causedByEventId;
         }
@@ -44,8 +42,6 @@ namespace Morphodyne.Core
         public long SimulationTick { get; }
 
         public EventKind Kind { get; }
-
-        public string Fact { get; }
 
         public EntityId? SubjectEntityId { get; }
 

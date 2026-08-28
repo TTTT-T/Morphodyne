@@ -10,14 +10,22 @@ namespace Morphodyne.Core.Tests
     public sealed class CoreModelTests
     {
         [Fact]
-        public void EntityIdRoundTripsWithoutAllowingEmptyIdentifiers()
+        public void EntityIdRoundTripsFromCallerProvidedValueWithoutAllowingEmptyIdentifiers()
         {
-            EntityId original = EntityId.New();
+            var original = new EntityId(Guid.NewGuid());
 
             Assert.True(EntityId.TryParse(original.ToString(), out EntityId parsed));
             Assert.Equal(original, parsed);
             Assert.Throws<ArgumentException>(() => new EntityId(Guid.Empty));
             Assert.False(EntityId.TryParse(Guid.Empty.ToString(), out _));
+        }
+
+        [Fact]
+        public void EntityIdExposesNoAmbientRandomFactory()
+        {
+            Assert.DoesNotContain(
+                typeof(EntityId).GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static),
+                method => method.ReturnType == typeof(EntityId) && method.GetParameters().Length == 0);
         }
 
         [Fact]
@@ -77,25 +85,27 @@ namespace Morphodyne.Core.Tests
             Part second = new Part(duplicateId, material, 2d, 293d);
 
             Assert.Throws<ArgumentException>(() =>
-                new Entity(EntityId.New(), new[] { first, second }, Array.Empty<Connection>()));
+                new Entity(new EntityId(Guid.NewGuid()), new[] { first, second }, Array.Empty<Connection>()));
         }
 
         [Fact]
-        public void EventSeparatesFactFromOptionalCausalReference()
+        public void EventContainsOnlyTypedAuthoritativeDataAndOptionalCausalReference()
         {
             Guid cause = Guid.NewGuid();
             var simulationEvent = new Event(
                 Guid.NewGuid(),
                 12,
                 EventKind.Contact,
-                "Two parts contacted.",
-                EntityId.New(),
+                new EntityId(Guid.NewGuid()),
                 cause);
 
             Assert.Equal(12, simulationEvent.SimulationTick);
             Assert.Equal(cause, simulationEvent.CausedByEventId);
+            Assert.DoesNotContain(
+                typeof(Event).GetProperties(),
+                property => property.PropertyType == typeof(string));
             Assert.Throws<ArgumentOutOfRangeException>(() =>
-                new Event(Guid.NewGuid(), -1, EventKind.Contact, "invalid"));
+                new Event(Guid.NewGuid(), -1, EventKind.Contact));
         }
 
         [Fact]

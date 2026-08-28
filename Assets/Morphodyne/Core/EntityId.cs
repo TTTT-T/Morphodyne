@@ -11,11 +11,6 @@ namespace Morphodyne.Core
 
         public Guid Value { get; }
 
-        public static EntityId New()
-        {
-            return new EntityId(Guid.NewGuid());
-        }
-
         public static EntityId Parse(string value)
         {
             return new EntityId(Guid.Parse(value));

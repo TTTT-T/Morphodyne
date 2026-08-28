@@ -27,6 +27,20 @@ else
   echo "PASS: forbidden predefined capability fields are absent."
 fi
 
+if rg -n 'Guid\.NewGuid\(' "${core_dir}"; then
+  echo "FAIL: Core creates identifiers from ambient randomness." >&2
+  failed=1
+else
+  echo "PASS: Core contains no ambient GUID creation."
+fi
+
+if rg -n '\bstring[[:space:]]+(Fact|fact)\b' "${core_dir}/Event.cs"; then
+  echo "FAIL: Event exposes a free-text authoritative fact payload." >&2
+  failed=1
+else
+  echo "PASS: Event contains no free-text authoritative fact payload."
+fi
+
 if rg -n '<ProjectReference|<PackageReference' "${repo_root}/dotnet/Morphodyne.Core/Morphodyne.Core.csproj"; then
   echo "FAIL: the .NET Core project declares an external project or package dependency." >&2
   failed=1
