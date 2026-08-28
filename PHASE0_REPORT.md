@@ -20,17 +20,27 @@ No blocking conflict or impossible Phase 0 requirement was found. The Architectu
 
 The Roadmap acceptance item requiring Windows to open and run the same Unity project revision cannot be verified from the current Mac-only session. The user explicitly allowed this external prerequisite to remain pending without lowering the acceptance standard.
 
+## PR review remediation
+
+PR review [#5047802562](https://github.com/TTTT-T/Morphodyne/pull/1#pullrequestreview-5047802562), submitted against commit `503f662`, identified one required Event-model issue and one deterministic-ID recommendation. Both were addressed in commit `7da527f`:
+
+- Removed free-text `Fact` from the authoritative Core Event model. Event now contains only typed kind, simulation tick, optional subject, and optional causal reference. Human-readable text remains in the separate diagnostic Logging layer.
+- Removed the ambient-random `EntityId.New()` factory. Core now requires callers to supply the identifier value; deterministic simulation creation paths can own their ID policy and seeded source.
+- Added regression tests and architecture checks preventing both patterns from being reintroduced.
+
+A complete typed physical Event payload remains intentionally deferred to the phase that owns those physical facts.
+
 ## Implemented work
 
 - Minimal Unity project metadata for the documented Unity 6.3 LTS baseline.
 - Unity assemblies and matching .NET projects for Core, PhysicsAdapter, Simulation, and Tools.
 - Pure-C# Core types:
-  - EntityId
+  - EntityId, with caller-supplied identity
   - Entity
   - Material
   - Part
   - Connection and generic ConnectionKind
-  - Event and generic EventKind
+  - Event and generic EventKind, with no free-text authoritative payload
   - Blueprint
 - Structural invariants for nonempty identifiers, finite physical values, unique part/connection IDs, and internal connection endpoints.
 - Minimal backend-neutral `IPhysicsAdapter.Step(PhysicsStep)` boundary.
@@ -164,11 +174,13 @@ Final result:
 - Assemblies built: Core, PhysicsAdapter, Simulation, Tools, Core.Tests.
 - Build warnings: 0.
 - Build errors: 0.
-- Unit tests: 13 passed, 0 failed, 0 skipped.
-- Reported test duration: 24 ms.
-- Architecture checks: 5 passed.
+- Unit tests: 14 passed, 0 failed, 0 skipped.
+- Reported test duration: 21 ms.
+- Architecture checks: 7 passed.
   - Core contains no Unity runtime symbols.
   - Forbidden predefined capability fields are absent.
+  - Core contains no ambient GUID creation.
+  - Event contains no free-text authoritative fact payload.
   - Core .NET project has no project or package dependencies.
   - Core Unity assembly prohibits engine references.
   - Every tracked Unity asset/folder has a `.meta` file.
@@ -183,6 +195,8 @@ Verified live on Mac:
 - All four runtime assemblies compile against `netstandard2.1` using .NET 8 SDK.
 - Core unit tests execute without Unity.
 - Core assembly references contain neither Unity nor other Morphodyne runtime assemblies.
+- EntityId exposes no zero-argument ambient-random factory.
+- Event exposes no string property or free-text authoritative fact payload.
 - No forbidden capability properties exist in the public Core surface or source scan.
 - Fixed-step adapter forwarding and failure behavior are covered by tests.
 - Bootstrap is rerunnable and uses bounded, ignored project-local caches.
@@ -212,7 +226,7 @@ The optional Mac-to-Windows SSH plan is documented in `docs/DEVELOPMENT.md`; no 
 - The minimal Unity shell may generate additional version-specific ProjectSettings or package lock data on first real import.
 - PowerShell scripts have not been parsed or executed by Windows PowerShell in this session.
 - Material values currently enforce only general finite/nonnegative invariants. Units, coordinate conventions, serialization schema, and detailed physical interpretation are not yet frozen by Architecture v0.1.
-- Event facts use a minimal text fact plus optional causal ID. A typed event payload design remains future work and must not be expanded without the responsible phase.
+- Event currently has typed metadata but no physical payload. A typed physical payload design remains future work and must not be expanded without the responsible phase.
 - GitHub CLI's auth diagnostic reported an invalid saved token, although push and authenticated PR creation both succeeded. The stale credential entry should be cleaned up separately; it did not block this handoff.
 
 ## Architecture deviations
@@ -235,6 +249,7 @@ Logical implementation commits before this report:
 - `de21c03` — chore: add reproducible Phase 0 workflows
 - `264dc8f` — test: verify Unity asset metadata coverage
 - `46d98d8` — docs: add Phase 0 validation report
+- `7da527f` — fix: remove semantic event text and ambient IDs
 
 Pull request: [#1 — Phase 0: establish project foundation](https://github.com/TTTT-T/Morphodyne/pull/1)
 
