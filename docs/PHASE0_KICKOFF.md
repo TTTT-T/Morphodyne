@@ -1,6 +1,6 @@
 # Phase 0 Kickoff — Project Foundation
 
-Use `docs/ARCHITECTURE_v0.1.md` and `docs/ROADMAP_v0.1.md` as the highest-priority project documents.
+Use `docs/ARCHITECTURE_v0.1.md`, `docs/ROADMAP_v0.1.md`, and root `AGENTS.md` as the governing project documents.
 
 Current scope is **Phase 0 only**. Do not begin Phase 1 work before explicit acceptance.
 
@@ -16,7 +16,8 @@ Current scope is **Phase 0 only**. Do not begin Phase 1 work before explicit acc
 8. If architecture documentation is insufficient, identify the gap explicitly instead of expanding project scope silently.
 9. Keep project documentation synchronized with any architectural change, including the reason for the change.
 10. Each independent module should have automated tests where feasible.
-11. At Phase 0 completion, stop and produce `PHASE0_REPORT.md`. Do not continue into Phase 1.
+11. Follow the Git and review boundary defined in `AGENTS.md`.
+12. At Phase 0 completion, stop and produce `PHASE0_REPORT.md`. Do not continue into Phase 1.
 
 ## Development environment
 
@@ -27,25 +28,60 @@ Current scope is **Phase 0 only**. Do not begin Phase 1 work before explicit acc
 - Do not run the Unity project directly from an SMB network-shared project directory.
 - If practical, establish Mac → Windows SSH-based validation, but this must not block the core Phase 0 foundation.
 
+### Environment setup policy
+
+Environment setup begins with an **audit, not installation**.
+
+Before installing or changing anything:
+
+1. Inspect the Mac for the required development tools and versions.
+2. Record what is already present and usable.
+3. Identify only the missing prerequisites required by Phase 0.
+4. Prefer project-local dependencies over unnecessary global installation.
+5. Clearly identify system-level changes, elevated-privilege operations, or security-sensitive configuration before performing them.
+6. Never store credentials, access tokens, passwords, or machine-specific secrets in the repository.
+
+Create and maintain reproducible setup helpers:
+
+- `scripts/bootstrap-mac.sh`
+- `scripts/bootstrap-windows.ps1`
+
+The bootstrap scripts should, where practical:
+
+- detect already-installed prerequisites;
+- avoid reinstalling satisfied dependencies;
+- fail clearly when manual intervention is required;
+- avoid destructive system changes;
+- document required versions or accepted version ranges;
+- be safe to re-run.
+
+For Phase 0, the Windows bootstrap may initially be a validation/setup helper rather than a fully unattended Unity installer if unattended installation would add unnecessary complexity or require credentials/licensing interaction.
+
 ## Phase 0 execution request
 
-1. Read and review Architecture v0.1 and Roadmap v0.1.
+1. Read and review `AGENTS.md`, Architecture v0.1, and Roadmap v0.1.
 2. Check for conflicts, impossible constraints, or significant engineering risks.
-3. Inspect the current development environment and dependencies.
-4. Produce an internal Phase 0 task breakdown with explicit acceptance criteria.
-5. If there is no blocking architectural issue, begin Phase 0 directly.
-6. Run all executable tests after implementation.
-7. Produce `PHASE0_REPORT.md` containing at minimum:
+3. Audit the current Mac development environment and dependencies before installing anything.
+4. Determine the minimal Phase 0 prerequisites and create/update the bootstrap scripts.
+5. Produce an internal Phase 0 task breakdown with explicit acceptance criteria.
+6. If there is no blocking architectural issue, begin Phase 0 directly.
+7. Run all executable tests after implementation.
+8. Perform Windows / Unity validation when the environment is available; if it is blocked by a clearly documented external prerequisite, report the exact blocker rather than fabricating a result.
+9. Produce `PHASE0_REPORT.md` containing at minimum:
    - implemented work
    - final directory structure
    - module dependency relationships
+   - environment audit results
+   - installed/required prerequisites
+   - bootstrap script status
    - test results
    - Mac validation results
    - Windows / Unity validation results
    - known issues
    - any deviation from Architecture / Roadmap
    - recommendation on whether Phase 1 should begin
-8. Stop at the Phase 0 acceptance point.
+10. Commit logical work units during implementation as required by `AGENTS.md`.
+11. At Phase completion, commit the final report, push `phase-0-foundation`, create a PR targeting `main`, and stop at the review boundary.
 
 ## Phase 0 minimum deliverables
 
@@ -55,7 +91,9 @@ Current scope is **Phase 0 only**. Do not begin Phase 1 work before explicit acc
 - Unit-test infrastructure.
 - Minimal Physics Adapter shell.
 - Basic logging conventions.
-- Mac build/test path.
+- Mac environment audit and build/test path.
+- `scripts/bootstrap-mac.sh`.
+- `scripts/bootstrap-windows.ps1`.
 - Windows Unity pull/open/run path.
 - Initial minimal Core concepts only:
   - EntityId
@@ -80,4 +118,4 @@ Do not implement in Phase 0:
 - evolution
 - natural-language creation
 
-The purpose of Phase 0 is to create a clean foundation, not a visible gameplay demo.
+The purpose of Phase 0 is to create a clean, reproducible foundation, not a visible gameplay demo.
