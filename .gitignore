@@ -1,0 +1,66 @@
+# Unity generated files
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# Asset metadata caches / crash files
+/[Aa]ssets/AssetStoreTools*
+/sysinfo.txt
+
+# IDE / editor
+.vscode/
+.idea/
+.vs/
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Rider
+.idea/
+*.sln.iml
+
+# Visual Studio Code / generated project files
+*.unityproj
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Build artifacts
+*.apk
+*.aab
+*.app
+*.exe
+*.unitypackage
+
+# Test / coverage output
+TestResults/
+coverage/
+
+# Local tooling / secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*~
