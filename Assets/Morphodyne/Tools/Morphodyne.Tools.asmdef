@@ -1,0 +1,11 @@
+{
+  "name": "Morphodyne.Tools",
+  "rootNamespace": "Morphodyne.Tools",
+  "references": [
+    "Morphodyne.Core",
+    "Morphodyne.Simulation"
+  ],
+  "autoReferenced": true,
+  "overrideReferences": false,
+  "noEngineReferences": true
+}

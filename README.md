@@ -33,6 +33,8 @@ See:
 - [`docs/ARCHITECTURE_v0.1.md`](docs/ARCHITECTURE_v0.1.md)
 - [`docs/ROADMAP_v0.1.md`](docs/ROADMAP_v0.1.md)
 - [`docs/PHASE0_KICKOFF.md`](docs/PHASE0_KICKOFF.md)
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)
+- [`docs/LOGGING.md`](docs/LOGGING.md)
 
 ## Status
 

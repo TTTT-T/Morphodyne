@@ -1,0 +1,8 @@
+{
+  "name": "Morphodyne.Core",
+  "rootNamespace": "Morphodyne.Core",
+  "references": [],
+  "autoReferenced": true,
+  "overrideReferences": false,
+  "noEngineReferences": true
+}

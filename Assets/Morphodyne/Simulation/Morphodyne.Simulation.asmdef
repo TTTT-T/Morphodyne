@@ -1,0 +1,11 @@
+{
+  "name": "Morphodyne.Simulation",
+  "rootNamespace": "Morphodyne.Simulation",
+  "references": [
+    "Morphodyne.Core",
+    "Morphodyne.PhysicsAdapter"
+  ],
+  "autoReferenced": true,
+  "overrideReferences": false,
+  "noEngineReferences": true
+}
