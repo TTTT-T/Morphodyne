@@ -54,6 +54,19 @@ Architecture takes precedence over implementation convenience.
 - Do not run the Unity project from an SMB or other network-mounted working tree.
 - Mac-to-Windows SSH automation is desirable but must not block the active Phase unless explicitly required by that Phase.
 
+### Mac Storage Policy
+
+The primary Mac has limited internal storage. Treat disk usage as a hard engineering constraint.
+
+- Do not install Unity Editor, Unity platform modules, Android SDK/NDK, Xcode components, local AI models, Docker images, or other heavyweight toolchains on the Mac unless a later Phase explicitly requires them and the user approves the installation.
+- Prefer running Unity, PhysX integration, builds, and heavyweight validation on Windows.
+- Keep the Mac environment intentionally small: Codex, Git, the minimum required .NET tooling, SSH, source code, documentation, and lightweight test dependencies.
+- Before installing any dependency expected to consume significant disk space, report its purpose and approximate footprint and wait for explicit approval if it is not required by the active Phase.
+- Avoid duplicate SDK versions unless required for compatibility.
+- Keep build outputs, package caches, temporary files, generated artifacts, and test results bounded and removable.
+- Bootstrap scripts should report major disk consumers and available free space where practical.
+- Do not store Unity `Library`, build artifacts, large datasets, model weights, or binary assets on the Mac merely for convenience.
+
 ## Git Workflow
 
 - `main` is the accepted project baseline.
