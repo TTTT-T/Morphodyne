@@ -41,6 +41,20 @@ else
   echo "PASS: the Unity Core assembly prohibits engine references."
 fi
 
+missing_meta=0
+while IFS= read -r -d '' asset_path; do
+  if [[ ! -f "${asset_path}.meta" ]]; then
+    echo "FAIL: missing Unity metadata for ${asset_path#"${repo_root}/"}." >&2
+    missing_meta=1
+  fi
+done < <(find "${repo_root}/Assets" -mindepth 1 ! -name '*.meta' -print0)
+
+if [[ "${missing_meta}" -ne 0 ]]; then
+  failed=1
+else
+  echo "PASS: every tracked Unity asset and folder has a metadata file."
+fi
+
 if [[ "${failed}" -ne 0 ]]; then
   exit 1
 fi
