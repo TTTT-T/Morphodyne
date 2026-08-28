@@ -41,6 +41,16 @@ Before installing or changing anything:
 5. Clearly identify system-level changes, elevated-privilege operations, or security-sensitive configuration before performing them.
 6. Never store credentials, access tokens, passwords, or machine-specific secrets in the repository.
 
+The Mac has limited internal storage. Treat storage use as a hard constraint:
+
+- Do not install Unity Editor or Unity platform modules on Mac for Phase 0.
+- Do not install Android/iOS toolchains, local AI models, Docker images, or other heavyweight dependencies unless explicitly required by a later Phase and approved by the user.
+- Keep Mac dependencies limited to Codex, Git, minimum required .NET tooling, SSH, source code, documentation, and lightweight test dependencies.
+- Prefer all Unity/PhysX integration, builds, large caches, binary assets, and heavyweight validation on Windows.
+- Avoid duplicate SDK versions.
+- Before any nontrivial installation, check free disk space and identify expected disk impact.
+- Generated build outputs and caches must remain removable and must not be committed.
+
 Create and maintain reproducible setup helpers:
 
 - `scripts/bootstrap-mac.sh`
@@ -50,6 +60,7 @@ The bootstrap scripts should, where practical:
 
 - detect already-installed prerequisites;
 - avoid reinstalling satisfied dependencies;
+- report available disk space and significant prerequisite footprints;
 - fail clearly when manual intervention is required;
 - avoid destructive system changes;
 - document required versions or accepted version ranges;
@@ -61,7 +72,7 @@ For Phase 0, the Windows bootstrap may initially be a validation/setup helper ra
 
 1. Read and review `AGENTS.md`, Architecture v0.1, and Roadmap v0.1.
 2. Check for conflicts, impossible constraints, or significant engineering risks.
-3. Audit the current Mac development environment and dependencies before installing anything.
+3. Audit the current Mac development environment, dependencies, and available disk space before installing anything.
 4. Determine the minimal Phase 0 prerequisites and create/update the bootstrap scripts.
 5. Produce an internal Phase 0 task breakdown with explicit acceptance criteria.
 6. If there is no blocking architectural issue, begin Phase 0 directly.
@@ -72,6 +83,7 @@ For Phase 0, the Windows bootstrap may initially be a validation/setup helper ra
    - final directory structure
    - module dependency relationships
    - environment audit results
+   - Mac free-space status and any material disk usage added by setup
    - installed/required prerequisites
    - bootstrap script status
    - test results
