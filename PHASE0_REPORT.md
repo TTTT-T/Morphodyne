@@ -112,7 +112,7 @@ Audit time: 2026-08-28 10:07 CST.
 | Git | 2.50.1, existing `/usr/bin/git` |
 | SSH client | OpenSSH 10.3p1, existing `/usr/bin/ssh` |
 | ripgrep | 15.1.0, existing Homebrew installation |
-| GitHub CLI | 2.87.3, installed; saved authentication was invalid at audit time |
+| GitHub CLI | 2.87.3; `gh auth status` reported an invalid saved token at audit time, but authenticated PR creation later succeeded |
 | .NET before setup | Not installed or available in PATH; no reusable Mono/MSBuild toolchain found |
 | .NET after setup | SDK 8.0.130, runtime 8.0.30, arm64; no workloads installed |
 | Unity on Mac | Not installed, by design |
@@ -213,7 +213,7 @@ The optional Mac-to-Windows SSH plan is documented in `docs/DEVELOPMENT.md`; no 
 - PowerShell scripts have not been parsed or executed by Windows PowerShell in this session.
 - Material values currently enforce only general finite/nonnegative invariants. Units, coordinate conventions, serialization schema, and detailed physical interpretation are not yet frozen by Architecture v0.1.
 - Event facts use a minimal text fact plus optional causal ID. A typed event payload design remains future work and must not be expanded without the responsible phase.
-- GitHub CLI authentication was invalid at audit time. Push will be attempted using Git credentials; PR creation may require re-authentication.
+- GitHub CLI's auth diagnostic reported an invalid saved token, although push and authenticated PR creation both succeeded. The stale credential entry should be cleaned up separately; it did not block this handoff.
 
 ## Architecture deviations
 
@@ -234,8 +234,11 @@ Logical implementation commits before this report:
 - `62d097e` — feat: add Phase 0 core model and boundaries
 - `de21c03` — chore: add reproducible Phase 0 workflows
 - `264dc8f` — test: verify Unity asset metadata coverage
+- `46d98d8` — docs: add Phase 0 validation report
 
-Pull request: pending push/authentication at the time this report was drafted. The PR URL will be added to this report on the existing branch after creation.
+Pull request: [#1 — Phase 0: establish project foundation](https://github.com/TTTT-T/Morphodyne/pull/1)
+
+PR status at handoff: open, targeting `main`, not merged.
 
 ## Phase 1 readiness recommendation
 
