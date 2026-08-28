@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>Morphodyne.Tools</AssemblyName>
+    <RootNamespace>Morphodyne.Tools</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Assets/Morphodyne/Tools/**/*.cs" />
+    <ProjectReference Include="../Morphodyne.Core/Morphodyne.Core.csproj" />
+    <ProjectReference Include="../Morphodyne.Simulation/Morphodyne.Simulation.csproj" />
+  </ItemGroup>
+</Project>

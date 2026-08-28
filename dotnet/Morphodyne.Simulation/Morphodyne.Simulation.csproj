@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>Morphodyne.Simulation</AssemblyName>
+    <RootNamespace>Morphodyne.Simulation</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Assets/Morphodyne/Simulation/**/*.cs" />
+    <ProjectReference Include="../Morphodyne.Core/Morphodyne.Core.csproj" />
+    <ProjectReference Include="../Morphodyne.PhysicsAdapter/Morphodyne.PhysicsAdapter.csproj" />
+  </ItemGroup>
+</Project>

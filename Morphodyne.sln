@@ -1,0 +1,42 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Morphodyne.Core", "dotnet/Morphodyne.Core/Morphodyne.Core.csproj", "{1F62F83A-7B38-4AA5-93CE-D8E753C08280}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Morphodyne.PhysicsAdapter", "dotnet/Morphodyne.PhysicsAdapter/Morphodyne.PhysicsAdapter.csproj", "{BA65332B-1A4F-4323-A9B2-C03F9CB8BB15}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Morphodyne.Simulation", "dotnet/Morphodyne.Simulation/Morphodyne.Simulation.csproj", "{95615948-7A17-44FA-95B9-7191F6DB05A1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Morphodyne.Tools", "dotnet/Morphodyne.Tools/Morphodyne.Tools.csproj", "{8A960D30-2784-42C0-924C-5739C50B3271}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Morphodyne.Core.Tests", "dotnet/Morphodyne.Core.Tests/Morphodyne.Core.Tests.csproj", "{64146E5C-3072-4549-AE64-F9075C186241}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1F62F83A-7B38-4AA5-93CE-D8E753C08280}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1F62F83A-7B38-4AA5-93CE-D8E753C08280}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1F62F83A-7B38-4AA5-93CE-D8E753C08280}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1F62F83A-7B38-4AA5-93CE-D8E753C08280}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BA65332B-1A4F-4323-A9B2-C03F9CB8BB15}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BA65332B-1A4F-4323-A9B2-C03F9CB8BB15}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BA65332B-1A4F-4323-A9B2-C03F9CB8BB15}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BA65332B-1A4F-4323-A9B2-C03F9CB8BB15}.Release|Any CPU.Build.0 = Release|Any CPU
+		{95615948-7A17-44FA-95B9-7191F6DB05A1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{95615948-7A17-44FA-95B9-7191F6DB05A1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{95615948-7A17-44FA-95B9-7191F6DB05A1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{95615948-7A17-44FA-95B9-7191F6DB05A1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8A960D30-2784-42C0-924C-5739C50B3271}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8A960D30-2784-42C0-924C-5739C50B3271}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8A960D30-2784-42C0-924C-5739C50B3271}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8A960D30-2784-42C0-924C-5739C50B3271}.Release|Any CPU.Build.0 = Release|Any CPU
+		{64146E5C-3072-4549-AE64-F9075C186241}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{64146E5C-3072-4549-AE64-F9075C186241}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{64146E5C-3072-4549-AE64-F9075C186241}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{64146E5C-3072-4549-AE64-F9075C186241}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
