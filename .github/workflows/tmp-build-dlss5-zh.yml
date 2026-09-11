@@ -1,0 +1,55 @@
+name: tmp-build-dlss5-zh
+on:
+  push:
+    branches: ["tmp-dlss5-zh-build"]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Clone upstream
+        shell: pwsh
+        run: git clone --depth 1 https://github.com/Kizzuwatnaa/DLSS5-Autopilot.git upstream
+      - name: Add Simplified Chinese layer
+        shell: pwsh
+        run: |
+          Copy-Item "tmp_dlss5_build/i18n_zh_cn.py" "upstream/core/i18n_zh_cn.py" -Force
+          @'
+          from pathlib import Path
+          p=Path('upstream/core/gui.py')
+          s=p.read_text(encoding='utf-8')
+          needle='from tkinter import filedialog, messagebox, ttk'
+          inject=needle+'\n\nfrom .i18n_zh_cn import install as _install_zh_cn; _install_zh_cn()'
+          if needle not in s:
+              raise SystemExit('tkinter import marker not found')
+          s=s.replace(needle, inject, 1)
+          p.write_text(s, encoding='utf-8')
+          '@ | python -
+      - name: Install build tools
+        run: python -m pip install --upgrade pyinstaller certifi
+      - name: Build Windows exe
+        working-directory: upstream
+        shell: pwsh
+        run: |
+          python -m PyInstaller --onefile --windowed --noupx `
+            --name dlss5-autopilot-zh-CN `
+            --version-file version_info.txt `
+            --icon dlss5-autopilot.ico `
+            --distpath dist `
+            --noconfirm `
+            dlss5_autopilot.py
+      - name: Smoke-check file
+        shell: pwsh
+        run: |
+          Get-Item "upstream/dist/dlss5-autopilot-zh-CN.exe" | Format-List Name,Length,LastWriteTime
+          Get-FileHash "upstream/dist/dlss5-autopilot-zh-CN.exe" -Algorithm SHA256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dlss5-autopilot-zh-CN
+          path: upstream/dist/dlss5-autopilot-zh-CN.exe
+          if-no-files-found: error
