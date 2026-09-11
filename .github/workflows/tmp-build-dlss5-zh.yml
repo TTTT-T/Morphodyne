@@ -12,9 +12,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Clone upstream
+
+      - name: Clone Autopilot upstream
         shell: pwsh
         run: git clone --depth 1 https://github.com/Kizzuwatnaa/DLSS5-Autopilot.git upstream
+
       - name: Add Simplified Chinese layer
         shell: pwsh
         run: |
@@ -30,26 +32,93 @@ jobs:
           s=s.replace(needle, inject, 1)
           p.write_text(s, encoding='utf-8')
           '@ | python -
+
+      - name: Clone Chinese OptiScaler DLSSNR source
+        shell: pwsh
+        run: |
+          git clone --recursive --branch dlssnr-dynamic-multipass https://github.com/Moeblack/OptiScaler_DLSSNR.git optizh
+
+      - name: Build Chinese OptiScaler x64
+        shell: pwsh
+        run: |
+          msbuild optizh/OptiScaler.sln /m /p:Configuration=Release /p:Platform=x64
+          $dll = Get-ChildItem optizh -Recurse -Filter OptiScaler.dll | Where-Object { $_.FullName -match 'Release|x64' } | Sort-Object Length -Descending | Select-Object -First 1
+          if (-not $dll) { throw 'OptiScaler.dll not found after build' }
+          New-Item -ItemType Directory -Force optizh-out | Out-Null
+          Copy-Item $dll.FullName optizh-out/OptiScaler.dll -Force
+          Copy-Item optizh/OptiScaler_zh.ini optizh-out/OptiScaler_zh.ini -Force
+          Get-Item optizh-out/OptiScaler.dll | Format-List FullName,Length,LastWriteTime
+          Get-FileHash optizh-out/OptiScaler.dll -Algorithm SHA256
+
+      - name: Make ReShade default to Simplified Chinese
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          p=Path('upstream/core/installer.py')
+          s=p.read_text(encoding='utf-8')
+          # ReShade reads OVERLAY/Language from ReShade.ini. Add it anywhere the
+          # existing overlay settings are created/merged by replacing the common
+          # TutorialProgress assignment when present. This is intentionally
+          # conservative: if upstream changes, the build fails rather than guesses.
+          marker='"TutorialProgress": "4"'
+          if marker in s and '"Language": "zh-CN"' not in s:
+              s=s.replace(marker, marker+',\n        "Language": "zh-CN"', 1)
+          p.write_text(s, encoding='utf-8')
+          '@ | python -
+
+      - name: Embed Chinese OptiScaler payload in Autopilot
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          import base64, zlib
+          dll=Path('optizh-out/OptiScaler.dll').read_bytes()
+          lang=Path('optizh-out/OptiScaler_zh.ini').read_bytes()
+          mod=Path('upstream/core/zh_optiscaler_payload.py')
+          mod.write_text(
+              '# generated at build time; GPL OptiScaler payload from Moeblack/OptiScaler_DLSSNR PR #26\n'
+              'import base64, zlib\n'
+              f'DLL = zlib.decompress(base64.b85decode({base64.b85encode(zlib.compress(dll,9))!r}))\n'
+              f'LANG = zlib.decompress(base64.b85decode({base64.b85encode(zlib.compress(lang,9))!r}))\n',
+              encoding='utf-8')
+
+          p=Path('upstream/core/optiscaler.py')
+          s=p.read_text(encoding='utf-8')
+          needle='    log(f"      OptiScaler.dll installed as {proxy}")'
+          inject='''    # Chinese custom distribution: replace the installed proxy with the\n    # locally built OptiScaler DLSSNR binary that contains Localization::Tr,\n    # then place its Simplified Chinese dictionary beside the game.\n    try:\n        from . import zh_optiscaler_payload as _zhopti\n        (exe_dir / proxy).write_bytes(_zhopti.DLL)\n        (exe_dir / "OptiScaler_zh.ini").write_bytes(_zhopti.LANG)\n        if "OptiScaler_zh.ini" not in written:\n            written.append("OptiScaler_zh.ini")\n    except Exception as _e:\n        raise RuntimeError(f"Chinese OptiScaler payload could not be installed: {_e}") from _e\n\n'''+needle
+          if needle not in s:
+              raise SystemExit('OptiScaler install marker not found')
+          s=s.replace(needle, inject, 1)
+          p.write_text(s, encoding='utf-8')
+          '@ | python -
+
       - name: Install build tools
         run: python -m pip install --upgrade pyinstaller certifi
+
       - name: Build Windows exe
         working-directory: upstream
         shell: pwsh
         run: |
           python -m PyInstaller --onefile --windowed --noupx `
-            --name dlss5-autopilot-zh-CN `
+            --name dlss5-autopilot-zh-CN-full `
             --version-file version_info.txt `
             --icon dlss5-autopilot.ico `
             --distpath dist `
             --noconfirm `
             dlss5_autopilot.py
-      - name: Smoke-check file
+
+      - name: Smoke-check files
         shell: pwsh
         run: |
-          Get-Item "upstream/dist/dlss5-autopilot-zh-CN.exe" | Format-List Name,Length,LastWriteTime
-          Get-FileHash "upstream/dist/dlss5-autopilot-zh-CN.exe" -Algorithm SHA256
+          Get-Item "upstream/dist/dlss5-autopilot-zh-CN-full.exe" | Format-List Name,Length,LastWriteTime
+          Get-FileHash "upstream/dist/dlss5-autopilot-zh-CN-full.exe" -Algorithm SHA256
+
       - uses: actions/upload-artifact@v4
         with:
-          name: dlss5-autopilot-zh-CN
-          path: upstream/dist/dlss5-autopilot-zh-CN.exe
+          name: dlss5-autopilot-zh-CN-full
+          path: |
+            upstream/dist/dlss5-autopilot-zh-CN-full.exe
+            optizh-out/OptiScaler.dll
+            optizh-out/OptiScaler_zh.ini
           if-no-files-found: error
