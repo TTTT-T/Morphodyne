@@ -19,3 +19,7 @@ canvas { display: block; }
   background: rgba(0, 0, 0, 0.55);
   border-radius: 6px;
 }
+
+.controls { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; max-width: 420px; }
+.controls button { cursor: pointer; padding: 5px 8px; color: #eee; background: #344454; border: 1px solid #607084; border-radius: 4px; }
+.controls button:hover { background: #49627a; }

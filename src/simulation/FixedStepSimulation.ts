@@ -8,7 +8,10 @@ export class FixedStepSimulation {
   timeScale = 1;
   private accumulator = 0;
 
-  constructor(private readonly physics: PhysicsAdapter) {}
+  constructor(
+    private readonly physics: PhysicsAdapter,
+    private readonly beforeStep?: (seconds: number, tick: number) => void,
+  ) {}
 
   advance(elapsedSeconds: number): number {
     if (!Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) throw new Error('Elapsed time must be nonnegative and finite');
@@ -24,6 +27,7 @@ export class FixedStepSimulation {
   }
 
   stepOnce(): void {
+    this.beforeStep?.(this.fixedSeconds, this.tick);
     this.physics.step(this.fixedSeconds);
     this.tick++;
   }
