@@ -32,7 +32,11 @@ describe('SensorRuntime boundary', () => {
       physics.step(1 / 60);
       sensors.afterPhysicsStep(tick, 1 / 60);
       const contacts = sensors.readAgentView().perceptions.filter((entry) => entry.channel === 'contact');
-      if (contacts.some((entry) => entry.values[3] > 0)) { measured = true; break; }
+      if (contacts.some((entry) => entry.values[3] > 0)) {
+        expect(contacts[0].values[1]).toBeLessThan(0);
+        measured = true;
+        break;
+      }
     }
     expect(measured).toBe(true);
   });
@@ -51,6 +55,8 @@ describe('SensorRuntime boundary', () => {
     const observations = sensors.readObservations();
     const orientation = observations.find((item) => item.channel === 'orientation');
     expect(orientation?.values.map((value) => value + 0)).toEqual([0, 0, 0, 1]);
+    const angular = observations.find((item) => item.channel === 'angular-velocity');
+    expect(angular?.values[0]).toBeCloseTo(physics.readPartAngularVelocity(body, 'part-core').x, 1);
     const joint = observations.find((item) => item.channel === 'joint' && item.ownConnectionId === 'connection-0-a');
     expect(joint?.values[0]).toBeCloseTo(physics.readJointPosition(body, 'connection-0-a'), 1);
     expect(joint?.values[1]).toBeCloseTo(physics.readJointVelocity(body, 'connection-0-a'), 1);
@@ -87,7 +93,7 @@ describe('SensorRuntime boundary', () => {
     expect(body.partHandles.has('part-1-a')).toBe(true);
   });
 
-  it('clears range observations when a physical target leaves its field', async () => {
+  it('clears range observations when a physical target leaves its range', async () => {
     const physics = await RapierPhysicsAdapter.create();
     const blueprint = createActiveBlueprint();
     const body = physics.createBody({ id: 'body', blueprint });
@@ -97,11 +103,12 @@ describe('SensorRuntime boundary', () => {
     physics.step(1 / 60);
     sensors.afterPhysicsStep(0, 1 / 60);
     expect(sensors.readAgentView().perceptions.some((item) => item.channel === 'range')).toBe(true);
-    physics.applyImpulse(target, { x: 15, y: 0, z: 0 });
-    for (let tick = 1; tick <= 6; tick += 1) {
+    physics.applyImpulse(target, { x: 0, y: 0, z: -50 });
+    for (let tick = 1; tick <= 3; tick += 1) {
       physics.step(1 / 60);
       sensors.afterPhysicsStep(tick, 1 / 60);
     }
+    expect(physics.readPose(target).position.z).toBeLessThan(-6);
     expect(sensors.readAgentView().perceptions.some((item) => item.channel === 'range')).toBe(false);
   });
 
