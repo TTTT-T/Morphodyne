@@ -66,6 +66,6 @@ The initial `main` baseline had failing typecheck/build because the CSS side-eff
 
 No Architecture or Roadmap principles were changed. The implementation keeps Three.js as presentation, Rapier as the physics executor, and Morphodyne as owner of simulation timing and structural semantics. No Phase 1 work was started. The kickoff named `phase-0-foundation` as the designated branch, but that remote branch already contains the earlier Unity history; this work uses `codex/phase-0-foundation-threejs` from the accepted Three.js/Rapier `main` baseline so it does not rewrite existing history.
 
-Implementation commits: `8962da9` (Core and adapters), `949edaf` (reproducible setup and documentation). Pull request: pending creation against `main`.
+Implementation commits: `8962da9` (Core and adapters), `949edaf` (reproducible setup and documentation). Initial report commit: `2448ccb`. Pull request: [#3 — Phase 0: establish Three.js/Rapier foundation](https://github.com/TTTT-T/Morphodyne/pull/3), targeting `main`.
 
 Recommendation: review and accept this Phase 0 foundation before authorizing Phase 1. Do not begin Phase 1 from this handoff.
