@@ -11,6 +11,7 @@ export class FixedStepSimulation {
   constructor(
     private readonly physics: PhysicsAdapter,
     private readonly beforeStep?: (seconds: number, tick: number) => void,
+    private readonly afterStep?: (seconds: number, tick: number) => void,
   ) {}
 
   advance(elapsedSeconds: number): number {
@@ -29,6 +30,7 @@ export class FixedStepSimulation {
   stepOnce(): void {
     this.beforeStep?.(this.fixedSeconds, this.tick);
     this.physics.step(this.fixedSeconds);
+    this.afterStep?.(this.fixedSeconds, this.tick);
     this.tick++;
   }
 
