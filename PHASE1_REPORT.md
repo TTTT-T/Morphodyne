@@ -30,4 +30,4 @@ Windows was not run; it is optional for this Phase. The browser scene is a visua
 
 No Architecture or Roadmap principles were changed. Initial non-rigid joint axes use the same local vector in both connected Part frames; the Blueprint validator requires those axes and anchors to align in the initial pose. This phase provides passive rigid-body structure only. The build still reports the existing large JavaScript chunk warning; it does not prevent the scene from running.
 
-Implementation commits: `041d682` (Core), `4709b82` (Physics), `4cba541` (passive scene). Pull request: pending creation against `main`. Stop at review; Phase 2 has not begun.
+Implementation commits: `041d682` (Core), `4709b82` (Physics), `4cba541` (passive scene); report commit: `3a672d0`. Pull request: [#4 — Phase 1: structural Blueprint physics](https://github.com/TTTT-T/Morphodyne/pull/4), targeting `main`. Stop at review; Phase 2 has not begun.
