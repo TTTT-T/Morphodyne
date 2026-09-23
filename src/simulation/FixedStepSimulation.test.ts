@@ -24,4 +24,12 @@ describe('fixed-step simulation', () => {
     expect(step).toHaveBeenCalledWith(1 / 60);
     expect(() => simulation.setTimeScale(0)).toThrow();
   });
+
+  it('issues control on every fixed step before physics', () => {
+    const order: string[] = [];
+    const physics = { step: () => order.push('physics') } as unknown as PhysicsAdapter;
+    const simulation = new FixedStepSimulation(physics, (_seconds, tick) => order.push(`control-${tick}`));
+    simulation.advance(1 / 30);
+    expect(order).toEqual(['control-0', 'physics', 'control-1', 'physics']);
+  });
 });
