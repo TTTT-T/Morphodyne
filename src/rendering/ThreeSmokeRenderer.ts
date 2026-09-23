@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import type { Pose, Vector3 } from '../core/model';
+import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
+import type { Geometry, Pose, Vector3 } from '../core/model';
 
 /** Presentation only: no physics stepping or world-rule decisions. */
 export class ThreeSmokeRenderer {
@@ -23,12 +24,37 @@ export class ThreeSmokeRenderer {
   }
 
   addBox(handle: number, halfExtents: Vector3, color: number): void {
-    const mesh = new THREE.Mesh(
+    this.addMesh(
+      handle,
       new THREE.BoxGeometry(halfExtents.x * 2, halfExtents.y * 2, halfExtents.z * 2),
-      new THREE.MeshStandardMaterial({ color }),
+      color,
     );
-    this.meshes.set(handle, mesh);
-    this.scene.add(mesh);
+  }
+
+  /** Add the presentation shape for one runtime Part. Physics owns its pose. */
+  addPart(handle: number, geometry: Geometry, color: number): void {
+    let threeGeometry: THREE.BufferGeometry;
+    switch (geometry.kind) {
+      case 'box':
+        threeGeometry = new THREE.BoxGeometry(
+          geometry.halfExtents.x * 2,
+          geometry.halfExtents.y * 2,
+          geometry.halfExtents.z * 2,
+        );
+        break;
+      case 'sphere':
+        threeGeometry = new THREE.SphereGeometry(geometry.radius, 24, 16);
+        break;
+      case 'capsule':
+        threeGeometry = new THREE.CapsuleGeometry(geometry.radius, geometry.halfHeight * 2, 8, 16);
+        break;
+      case 'convex':
+        threeGeometry = new ConvexGeometry(
+          geometry.points.map((point) => new THREE.Vector3(point.x, point.y, point.z)),
+        );
+        break;
+    }
+    this.addMesh(handle, threeGeometry, color);
   }
 
   setPose(handle: number, pose: Pose): void {
@@ -46,5 +72,21 @@ export class ThreeSmokeRenderer {
     this.camera.aspect = innerWidth / innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(innerWidth, innerHeight);
+  }
+
+  private addMesh(handle: number, geometry: THREE.BufferGeometry, color: number): void {
+    const previous = this.meshes.get(handle);
+    if (previous) {
+      this.scene.remove(previous);
+      previous.geometry.dispose();
+      if (Array.isArray(previous.material)) {
+        previous.material.forEach((material) => material.dispose());
+      } else {
+        previous.material.dispose();
+      }
+    }
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color }));
+    this.meshes.set(handle, mesh);
+    this.scene.add(mesh);
   }
 }
