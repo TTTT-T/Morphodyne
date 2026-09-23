@@ -1,3 +1,3 @@
 # Tools
 
-Debug inspection, construction tooling, test scenes, and later god-sandbox tools belong here.
+Phase 0 contains the adapter smoke-scene setup and structured logging sink. Construction and god-sandbox tools are deferred to later phases.
