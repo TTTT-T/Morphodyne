@@ -36,7 +36,7 @@ See:
 
 ## Status
 
-**Pre-alpha / Phase 5 minimal agent brain complete. Phase 6 next.**
+**Pre-alpha / Phase 6 skill adaptation complete. Phase 7 next.**
 
 The project currently prioritizes correct interfaces, modularity, causal correctness, and testability over visual fidelity or content volume.
 
