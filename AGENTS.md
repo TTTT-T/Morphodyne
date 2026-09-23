@@ -16,8 +16,8 @@ Architecture takes precedence over implementation convenience.
 - Non-core systems may use low-fidelity implementations, but must not bypass core rules to manufacture outcomes.
 - Prefer general rules and reusable interfaces over species-, machine-, or scenario-specific logic.
 - If existing abstractions cannot express a requirement, review and improve the abstraction before adding special-case logic.
-- Keep the Simulation Core independent from Unity wherever practical.
-- Unity / PhysX is an execution backend, not the source of simulation semantics.
+- Keep the Simulation Core independent from Three.js wherever practical.
+- Three.js / Rapier is an execution backend, not the source of simulation semantics.
 - Physics is the final arbiter of physical outcomes.
 
 ## Scope Discipline
@@ -34,7 +34,7 @@ Architecture takes precedence over implementation convenience.
 - Keep dependencies directional and explicit.
 - Avoid large classes that own multiple simulation responsibilities.
 - Every new module must have a clear ownership boundary.
-- Core types and rules should remain testable without launching Unity whenever practical.
+- Core types and rules should remain testable without launching Three.js whenever practical.
 
 ## Environment
 
@@ -48,24 +48,24 @@ Architecture takes precedence over implementation convenience.
   - `scripts/bootstrap-mac.sh`
   - `scripts/bootstrap-windows.ps1`
 - Bootstrap scripts must be safe to re-run where practical and should detect already-satisfied prerequisites.
-- Mac is the primary Codex, Git, Core development, documentation, and pure-C# test environment.
-- Windows is the Unity / PhysX integration and performance-validation environment.
+- Mac is the primary Codex, Git, Core development, documentation, browser development, and test environment.
+- Windows is optional for later cross-platform and performance validation; it is not required for Phase 0.
 - Each machine keeps its own local repository clone and synchronizes through Git.
-- Do not run the Unity project from an SMB or other network-mounted working tree.
+- Do not run the Three.js project from an SMB or other network-mounted working tree.
 - Mac-to-Windows SSH automation is desirable but must not block the active Phase unless explicitly required by that Phase.
 
 ### Mac Storage Policy
 
 The primary Mac has limited internal storage. Treat disk usage as a hard engineering constraint.
 
-- Do not install Unity Editor, Unity platform modules, Android SDK/NDK, Xcode components, local AI models, Docker images, or other heavyweight toolchains on the Mac unless a later Phase explicitly requires them and the user approves the installation.
-- Prefer running Unity, PhysX integration, builds, and heavyweight validation on Windows.
-- Keep the Mac environment intentionally small: Codex, Git, the minimum required .NET tooling, SSH, source code, documentation, and lightweight test dependencies.
+- Do not install heavyweight IDEs, local AI models, Docker images, mobile SDKs, or unrelated toolchains on the Mac unless a later Phase explicitly requires them and the user approves the installation.
+- Prefer the lightweight browser/Node toolchain on Mac. Use Windows only when later validation benefits from it.
+- Keep the Mac environment intentionally small: Codex, Git, the minimum required Node.js tooling, SSH, source code, documentation, and lightweight test dependencies.
 - Before installing any dependency expected to consume significant disk space, report its purpose and approximate footprint and wait for explicit approval if it is not required by the active Phase.
 - Avoid duplicate SDK versions unless required for compatibility.
 - Keep build outputs, package caches, temporary files, generated artifacts, and test results bounded and removable.
 - Bootstrap scripts should report major disk consumers and available free space where practical.
-- Do not store Unity `Library`, build artifacts, large datasets, model weights, or binary assets on the Mac merely for convenience.
+- Do not store large build artifacts, datasets, model weights, or binary assets on the Mac merely for convenience.
 
 ## Git Workflow
 
@@ -89,7 +89,7 @@ A Phase is not complete merely because implementation exists.
 Before declaring a Phase complete:
 
 1. Run all applicable automated tests.
-2. Perform all validation required by the active Phase, including Windows / Unity validation when applicable.
+2. Perform all validation required by the active Phase, including Windows / Three.js validation when applicable.
 3. Compare the implementation against Architecture and Roadmap.
 4. Create or update the Phase report.
 5. Commit all completed Phase work.
@@ -110,7 +110,7 @@ Include:
 - files and modules affected;
 - tests performed and exact results;
 - Mac validation results;
-- Windows / Unity validation results when applicable;
+- Windows / Three.js validation results when applicable;
 - known limitations;
 - architecture deviations;
 - unresolved risks;
