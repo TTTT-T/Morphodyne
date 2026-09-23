@@ -20,21 +20,45 @@ Architecture takes precedence over implementation convenience.
 - Three.js / Rapier is an execution backend, not the source of simulation semantics.
 - Physics is the final arbiter of physical outcomes.
 
+## Development Priority
+
+Morphodyne exists to realize the project vision and validate the simulation ideas. Engineering process exists to support that goal, not to become the goal itself.
+
+- Optimize for meaningful project progress per unit of effort.
+- Prefer the smallest implementation or experiment that proves the next important causal capability.
+- Tests, reports, abstractions, tooling, and documentation should be added when they materially reduce risk, preserve important knowledge, or accelerate later work.
+- Do not spend substantial time maximizing test coverage, process completeness, documentation volume, infrastructure polish, or ceremonial workflow when they do not materially advance the simulation.
+- Avoid building systems for hypothetical future needs before the active work requires them.
+- When choosing between additional process and advancing a reversible, low-risk implementation, prefer advancing the implementation.
+- Do not trade away core causal correctness, repository safety, or architectural boundaries merely for speed.
+
 ## Scope Discipline
 
-- Work only on the active Phase.
-- Do not implement later-phase features unless the current Phase explicitly requires an interface placeholder.
+- Work primarily on the active Phase and its acceptance goal.
+- Do not implement later-phase features unless they are necessary to validate the active Phase or establish a required interface.
 - Prefer the smallest implementation that validates the current architectural contract.
 - Do not add speculative complexity for possible future needs.
 - Do not create object-specific shortcuts merely to produce a visible demo.
 
 ## Modularity
 
-- Break work into small, independently testable modules.
+- Break work into small modules with clear ownership boundaries.
 - Keep dependencies directional and explicit.
 - Avoid large classes that own multiple simulation responsibilities.
-- Every new module must have a clear ownership boundary.
-- Core types and rules should remain testable without launching Three.js whenever practical.
+- Core types and rules should remain testable without launching Three.js wherever practical.
+- Do not split code into extra modules merely to satisfy an abstract notion of purity; modularity should make the project easier to reason about, change, or delegate.
+
+## Testing Strategy
+
+Testing should be proportional to risk. The project does not optimize for test count or coverage percentage.
+
+- Prioritize focused automated tests for core causal rules, structural validation, adapter contracts, deterministic logic, and previously observed regressions.
+- Prefer a lightweight smoke test or direct browser validation for presentation, debug tooling, and simple integration paths when that gives sufficient confidence faster.
+- Do not duplicate essentially identical tests across layers.
+- During implementation, run the narrowest relevant checks first.
+- Run the full test suite, typecheck, and build at important integration points and before Phase handoff or PR creation, rather than after every small edit.
+- A Phase needs enough evidence to show its acceptance goal works; it does not require exhaustive validation of every possible future case.
+- If a test is expensive to build and protects only low-risk or disposable code, defer it unless a real failure justifies the cost.
 
 ## Environment
 
@@ -67,6 +91,18 @@ The primary Mac has limited internal storage. Treat disk usage as a hard enginee
 - Bootstrap scripts should report major disk consumers and available free space where practical.
 - Do not store large build artifacts, datasets, model weights, or binary assets on the Mac merely for convenience.
 
+## Agent Orchestration
+
+The main agent is the project lead. It should control the overall objective, architecture, task decomposition, integration, and final review rather than personally implementing every bounded task.
+
+- Prefer delegating well-scoped implementation, research, refactoring, test-writing, and investigation tasks to Luna subagents when Luna is available and delegation is likely to save time.
+- Keep the main agent focused on the critical path: deciding what matters next, preserving architectural consistency, integrating results, and resolving cross-module tradeoffs.
+- Give subagents narrow objectives, relevant constraints, expected outputs, and clear file/module ownership.
+- Subagents may propose local improvements but must not silently redefine project architecture or core principles.
+- Parallelize independent tasks when practical, but avoid coordination overhead that costs more time than it saves.
+- Do not create dedicated verifier/reviewer subagents by default. The main agent is responsible for reviewing integrated work and deciding whether the Phase goal is satisfied.
+- If a task is faster and clearer for the main agent to complete directly, do so; delegation is a speed tool, not a ritual.
+
 ## Git Workflow
 
 - `main` is the accepted project baseline.
@@ -75,10 +111,11 @@ The primary Mac has limited internal storage. Treat disk usage as a hard enginee
 - Do not rewrite accepted history or force-push.
 - Preserve unrelated user changes.
 - Commit completed logical units separately with descriptive commit messages.
-- Before each implementation commit:
-  1. run applicable tests;
+- Before an implementation commit, use judgment:
+  1. run the focused checks needed for the changed area;
   2. inspect the diff;
   3. verify no unrelated files changed.
+- Do not rerun the entire validation matrix for every small commit when narrower checks are sufficient.
 - Keep generated caches, build outputs, local IDE state, credentials, and machine-specific artifacts out of Git.
 - Leave the working tree clean when handing work off for review.
 
@@ -88,14 +125,16 @@ A Phase is not complete merely because implementation exists.
 
 Before declaring a Phase complete:
 
-1. Run all applicable automated tests.
-2. Perform all validation required by the active Phase, including Windows / Three.js validation when applicable.
+1. Run the focused automated tests and smoke checks needed to establish the Phase acceptance goal.
+2. Run the project-wide typecheck/build and any other validation that is materially relevant to the changed system.
 3. Compare the implementation against Architecture and Roadmap.
-4. Create or update the Phase report.
+4. Create or update a concise Phase report containing the evidence needed for review.
 5. Commit all completed Phase work.
 6. Push the designated Phase branch.
 7. Create a pull request targeting `main`.
 8. Stop at the review boundary.
+
+Do not add extra validation or reporting solely for ceremony. Phase completion evidence should be sufficient, concise, and decision-oriented.
 
 Do not begin the next Phase until the current Phase has been reviewed and accepted.
 
