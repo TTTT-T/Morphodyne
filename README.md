@@ -36,7 +36,7 @@ See:
 
 ## Status
 
-**Pre-alpha / Phase 0 foundation — Three.js/Rapier technical pivot.**
+**Pre-alpha / Phase 1 structural physics under review.**
 
 The project currently prioritizes correct interfaces, modularity, causal correctness, and testability over visual fidelity or content volume.
 
@@ -50,6 +50,6 @@ npm ci
 npm run dev
 ```
 
-The Phase 0 smoke scene intentionally stays minimal: a Rapier-driven rigid body rendered by Three.js. Its overlay shows the simulation tick and cube height. The cube should settle near y=0.5 on the ground. It proves adapter wiring, while Blueprint-to-body mapping remains Phase 1 work.
+The Phase 1 scene renders a passive five-Part Blueprint driven by Rapier. Its overlay shows the simulation tick, Part count, and center height. The assembly should settle with its center near y=1.80; Three.js displays the Part poses returned by physics.
 
 Run `npm test`, `npm run typecheck`, and `npm run build` for the Mac acceptance checks. See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) for module boundaries and bootstrap scripts.
