@@ -23,6 +23,10 @@ export interface Material {
   readonly density: number;
   readonly friction: number;
   readonly restitution: number;
+  /** Optional impulse at which persistent structural degradation begins (N·s). */
+  readonly yieldImpulseNs?: number;
+  /** Optional cumulative impulse tolerance before the material fractures (N·s). */
+  readonly toughnessImpulseNs?: number;
 }
 
 export type Geometry =
@@ -45,6 +49,8 @@ export interface ConnectionBase {
   readonly id: string;
   readonly fromPartId: string;
   readonly toPartId: string;
+  /** Optional impulse capacity of this structural connection (N·s). */
+  readonly strengthImpulseNs?: number;
   /** Anchor expressed in the local frame of the corresponding part. */
   readonly fromAnchor: Vector3;
   /** Anchor expressed in the local frame of the corresponding part. */
@@ -200,6 +206,12 @@ export function validateBlueprint(blueprint: Blueprint): string[] {
     if (!Number.isFinite(material.density) || material.density <= 0) errors.push(`Invalid density: ${material.id}`);
     if (!Number.isFinite(material.friction) || material.friction < 0) errors.push(`Invalid friction: ${material.id}`);
     if (!Number.isFinite(material.restitution) || material.restitution < 0 || material.restitution > 1) errors.push(`Invalid restitution: ${material.id}`);
+    if (material.yieldImpulseNs !== undefined && (!Number.isFinite(material.yieldImpulseNs) || material.yieldImpulseNs <= 0)) {
+      errors.push(`Invalid yieldImpulseNs: ${material.id}`);
+    }
+    if (material.toughnessImpulseNs !== undefined && (!Number.isFinite(material.toughnessImpulseNs) || material.toughnessImpulseNs <= 0)) {
+      errors.push(`Invalid toughnessImpulseNs: ${material.id}`);
+    }
   }
 
   const partIds = new Set<string>();
@@ -219,6 +231,10 @@ export function validateBlueprint(blueprint: Blueprint): string[] {
   for (const connection of blueprint.connections) {
     if (!connection.id.trim() || connectionIds.has(connection.id)) errors.push(`Invalid or duplicate connection id: ${connection.id}`);
     connectionIds.add(connection.id);
+    if (connection.strengthImpulseNs !== undefined
+      && (!Number.isFinite(connection.strengthImpulseNs) || connection.strengthImpulseNs <= 0)) {
+      errors.push(`Invalid strengthImpulseNs: ${connection.id}`);
+    }
     if (!partIds.has(connection.fromPartId) || !partIds.has(connection.toPartId)) errors.push(`Unknown connection endpoint: ${connection.id}`);
     if (connection.fromPartId === connection.toPartId) errors.push(`Self connection: ${connection.id}`);
     if (!isFiniteVector(connection.fromAnchor) || !isFiniteVector(connection.toAnchor)) errors.push(`Invalid connection anchors: ${connection.id}`);
