@@ -25,6 +25,7 @@ export interface SelfModel {
   readonly tick: number;
   readonly orientation: VectorEstimate | null;
   readonly angularVelocity: VectorEstimate | null;
+  readonly localVelocity: VectorEstimate | null;
   readonly parts: readonly OwnPartEstimate[];
   readonly joints: readonly OwnJointEstimate[];
   readonly contacts: ContactEstimate;
@@ -58,7 +59,7 @@ const CONTACT_MEMORY_TICKS = 30;
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
 
 export function createSelfModel(): SelfModel {
-  return { tick: -1, orientation: null, angularVelocity: null, parts: [], joints: [],
+  return { tick: -1, orientation: null, angularVelocity: null, localVelocity: null, parts: [], joints: [],
     contacts: { lastSeenTick: null, confidence: 0, recent: false },
     stability: { level: 'unknown', confidence: 0 }, observedSensorIds: [], proprioceptionAvailable: false,
     lastFeedbackGapTick: null, feedbackGapRecent: false };
@@ -68,9 +69,10 @@ export function createSelfModel(): SelfModel {
 export function updateSelfModel(previous: SelfModel, view: AgentPerceptionView): SelfModel {
   const current = view.perceptions.filter((p) => isPerceptionCurrent(p, view.tick));
   const proprio = current.filter((p) => p.channel === 'orientation' || p.channel === 'angular-velocity'
-    || p.channel === 'relative-pose' || p.channel === 'joint');
+    || p.channel === 'local-velocity' || p.channel === 'relative-pose' || p.channel === 'joint');
   const orientation = estimate(proprio.find((p) => p.channel === 'orientation'));
   const angularVelocity = estimate(proprio.find((p) => p.channel === 'angular-velocity'));
+  const localVelocity = estimate(proprio.find((p) => p.channel === 'local-velocity'));
   const parts = proprio.filter((p) => p.channel === 'relative-pose' && p.ownPartId)
     .map((p) => ({ partId: p.ownPartId!, value: [...p.values], confidence: clamp01(p.confidence), observedTick: p.tick }));
   const joints = proprio.filter((p) => p.channel === 'joint' && p.ownConnectionId)
@@ -88,7 +90,7 @@ export function updateSelfModel(previous: SelfModel, view: AgentPerceptionView):
       confidence: clamp01((angularVelocity?.confidence ?? 0) * (contactRecent ? retainedContact.confidence : 0.5)) };
   const lostFeedback = parts.length < previous.parts.length || joints.length < previous.joints.length;
   const lastFeedbackGapTick = lostFeedback ? view.tick : previous.lastFeedbackGapTick;
-  return { tick: view.tick, orientation, angularVelocity, parts, joints,
+  return { tick: view.tick, orientation, angularVelocity, localVelocity, parts, joints,
     contacts: { ...retainedContact, recent: contactRecent }, stability,
     observedSensorIds: [...new Set(current.map((p) => p.sensorId))], proprioceptionAvailable: proprio.length > 0,
     lastFeedbackGapTick, feedbackGapRecent: lastFeedbackGapTick !== null && view.tick - lastFeedbackGapTick <= 30 };

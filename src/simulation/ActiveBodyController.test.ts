@@ -45,6 +45,22 @@ describe('active body controller', () => {
     expect(turnOnly.map(({ value }) => value)).not.toEqual(signals.map(({ value }) => value));
   });
 
+  it('adjusts forward motor output with amplitude and phase while preserving legacy intent', () => {
+    const controller = new ActiveBodyController(channels, { cycleFrequencyHz: 1 });
+    const input = { seconds: 0, rootPose: identityPose, channels, phaseRadians: 0 } as const;
+    const legacy = controller.generateSignals({ ...input, intent: { forward: 1, turn: 0 } });
+    const explicitDefaults = controller.generateSignals({ ...input,
+      intent: { forward: 1, turn: 0, amplitude: 1, phaseOffset: 0 } });
+    const muted = controller.generateSignals({ ...input,
+      intent: { forward: 1, turn: 0, amplitude: 0 } });
+    const shifted = controller.generateSignals({ ...input,
+      intent: { forward: 1, turn: 0, amplitude: 1, phaseOffset: Math.PI / 2 } });
+
+    expect(explicitDefaults.map(({ value }) => value)).toEqual(legacy.map(({ value }) => value));
+    expect(muted.every(({ value }) => Math.abs(value) < 1e-9)).toBe(true);
+    expect(shifted.map(({ value }) => value)).not.toEqual(legacy.map(({ value }) => value));
+  });
+
   it('keeps the standing signal closed-loop and separate from oscillation', () => {
     const controller = new ActiveBodyController(channels, {
       standingGain: 1,
@@ -83,5 +99,7 @@ describe('active body controller', () => {
       { actuatorId: 'a', x: 0, z: 0, phase: Number.NaN },
     ])).toThrow(/phase/);
     expect(() => controller.update(0, identityPose, { forward: Number.NaN, turn: 0 })).toThrow(/forward/);
+    expect(() => controller.update(0, identityPose, { forward: 0, turn: 0, amplitude: Number.NaN })).toThrow(/amplitude/);
+    expect(() => controller.update(0, identityPose, { forward: 0, turn: 0, phaseOffset: Number.NaN })).toThrow(/phase offset/);
   });
 });
