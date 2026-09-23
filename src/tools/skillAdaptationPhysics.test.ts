@@ -91,6 +91,7 @@ describe('Phase 6 physical adaptation', () => {
     const trial = await createTrial();
     for (let tick = 0; tick < 250; tick++) trial.step();
     const before = [...trial.records];
+    expect(trial.damage.state.connections['connection-0-a'].connected).toBe(true);
     trial.impact();
     for (let tick = 0; tick < 360; tick++) trial.step();
     const after = trial.records.slice(before.length);
