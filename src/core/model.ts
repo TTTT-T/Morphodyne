@@ -45,6 +45,46 @@ export interface Part {
   readonly mass?: number;
 }
 
+export interface SensorNoise {
+  /** Standard deviation in the sensor's measurement units. */
+  readonly standardDeviation: number;
+}
+
+export interface SensorBase {
+  readonly id: string;
+  /** Part carrying this sensor. Structural separation can make it unreachable. */
+  readonly partId: string;
+  /** Pose relative to the mounting Part. */
+  readonly localPose: Pose;
+  /** Forward direction in the sensor frame. */
+  readonly forward: Vector3;
+  readonly updatePeriodTicks: number;
+  readonly noise: SensorNoise;
+  readonly latencyTicks: number;
+}
+
+export interface ContactSensor extends SensorBase {
+  readonly kind: 'contact';
+  readonly range: number;
+  readonly resolution: number;
+}
+
+export interface ProprioceptionSensor extends SensorBase {
+  readonly kind: 'proprioception';
+  readonly resolution: number;
+}
+
+export interface RangeSensor extends SensorBase {
+  readonly kind: 'range';
+  readonly range: number;
+  /** Horizontal field of view in radians. */
+  readonly fieldOfViewRadians: number;
+  /** Number of angular samples across the field of view. */
+  readonly resolution: number;
+}
+
+export type Sensor = ContactSensor | ProprioceptionSensor | RangeSensor;
+
 export interface ConnectionBase {
   readonly id: string;
   readonly fromPartId: string;
@@ -91,6 +131,8 @@ export interface Blueprint {
   readonly connections: readonly Connection[];
   /** Optional actuator declarations; omitted for passive structures. */
   readonly actuators?: readonly JointActuator[];
+  /** Optional sensors mounted on Parts. */
+  readonly sensors?: readonly Sensor[];
 }
 
 export interface Entity {
@@ -297,6 +339,49 @@ export function validateBlueprint(blueprint: Blueprint): string[] {
     if (!connection) errors.push(`Unknown actuator connection: ${actuator.id}`);
     else if (connection.kind !== 'revolute' && connection.kind !== 'prismatic') {
       errors.push(`Actuator requires a revolute or prismatic connection: ${actuator.id}`);
+    }
+  }
+
+  const sensorIds = new Set<string>();
+  for (const sensor of blueprint.sensors ?? []) {
+    const sensorId = sensor.id;
+    if (!sensor.id.trim() || sensorIds.has(sensor.id)) errors.push(`Invalid or duplicate sensor id: ${sensor.id}`);
+    sensorIds.add(sensor.id);
+    if (!partIds.has(sensor.partId)) errors.push(`Unknown sensor part: ${sensor.id}`);
+    if (!isFiniteVector(sensor.localPose.position) || !isUnitQuaternion(sensor.localPose.rotation)) {
+      errors.push(`Invalid sensor pose: ${sensor.id}`);
+    }
+    if (!isFiniteVector(sensor.forward)
+      || sensor.forward.x ** 2 + sensor.forward.y ** 2 + sensor.forward.z ** 2 <= VECTOR_EPSILON_SQUARED) {
+      errors.push(`Invalid sensor forward: ${sensor.id}`);
+    }
+    if (!Number.isInteger(sensor.updatePeriodTicks) || sensor.updatePeriodTicks <= 0) {
+      errors.push(`Invalid sensor updatePeriodTicks: ${sensor.id}`);
+    }
+    if (!Number.isFinite(sensor.noise.standardDeviation) || sensor.noise.standardDeviation < 0) {
+      errors.push(`Invalid sensor noise: ${sensor.id}`);
+    }
+    if (!Number.isInteger(sensor.latencyTicks) || sensor.latencyTicks < 0) {
+      errors.push(`Invalid sensor latencyTicks: ${sensor.id}`);
+    }
+
+    switch (sensor.kind) {
+      case 'contact':
+        if (!Number.isFinite(sensor.range) || sensor.range <= 0) errors.push(`Invalid sensor range: ${sensor.id}`);
+        if (!Number.isInteger(sensor.resolution) || sensor.resolution <= 0) errors.push(`Invalid sensor resolution: ${sensor.id}`);
+        break;
+      case 'proprioception':
+        if (!Number.isInteger(sensor.resolution) || sensor.resolution <= 0) errors.push(`Invalid sensor resolution: ${sensor.id}`);
+        break;
+      case 'range':
+        if (!Number.isFinite(sensor.range) || sensor.range <= 0) errors.push(`Invalid sensor range: ${sensor.id}`);
+        if (!Number.isFinite(sensor.fieldOfViewRadians) || sensor.fieldOfViewRadians <= 0 || sensor.fieldOfViewRadians > Math.PI * 2) {
+          errors.push(`Invalid sensor fieldOfViewRadians: ${sensor.id}`);
+        }
+        if (!Number.isInteger(sensor.resolution) || sensor.resolution <= 0) errors.push(`Invalid sensor resolution: ${sensor.id}`);
+        break;
+      default:
+        errors.push(`Invalid sensor kind: ${sensorId}`);
     }
   }
   return errors;

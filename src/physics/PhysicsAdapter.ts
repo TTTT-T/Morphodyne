@@ -9,6 +9,17 @@ export interface BoxSpec {
 
 export type BodyHandle = number;
 
+export interface PhysicalContact {
+  /** Contact point in world coordinates; available only inside the sensor runtime. */
+  readonly point: Vector3;
+  readonly impulseNs: number;
+}
+
+export interface RayHit {
+  readonly distance: number;
+  readonly point: Vector3;
+}
+
 /** Backend boundary; a Blueprint instance becomes a PhysicsBody at runtime. */
 export interface PhysicsAdapter {
   createBox(spec: BoxSpec): BodyHandle;
@@ -21,6 +32,11 @@ export interface PhysicsAdapter {
    * Part had no recorded external impulse or contact force in that step.
    */
   readPartImpactImpulse(body: PhysicsBody, partId: string): number;
+  /** Actual narrow-phase contacts from the last completed step, excluding applied free impulses. */
+  readPartContacts(body: PhysicsBody, partId: string): readonly PhysicalContact[];
+  readPartAngularVelocity(body: PhysicsBody, partId: string): Vector3;
+  /** First physical surface along a ray, excluding only the mounting Part collider. */
+  castSensorRay(origin: Vector3, direction: Vector3, range: number, excludePartHandle: BodyHandle): RayHit | null;
   /**
    * Remove one runtime structural connection from the physics world. The
    * connected rigid bodies remain alive as independent bodies after removal.

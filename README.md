@@ -36,7 +36,7 @@ See:
 
 ## Status
 
-**Pre-alpha / Phase 3 structural damage complete. Phase 4 next.**
+**Pre-alpha / Phase 4 sensor and perception implementation awaiting review.**
 
 The project currently prioritizes correct interfaces, modularity, causal correctness, and testability over visual fidelity or content volume.
 
@@ -50,6 +50,6 @@ npm ci
 npm run dev
 ```
 
-The Phase 1 scene renders a passive five-Part Blueprint driven by Rapier. Its overlay shows the simulation tick, Part count, and center height. The assembly should settle with its center near y=1.80; Three.js displays the Part poses returned by physics.
+The browser scene renders an active Blueprint from Rapier poses. Its overlay shows sensor status, range returns, contact measurements, and structural separation. The controller receives proprioception through the perception view; the debug renderer remains a direct view of physical state.
 
 Run `npm test`, `npm run typecheck`, and `npm run build` for the Mac acceptance checks. See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) for module boundaries and bootstrap scripts.

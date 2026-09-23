@@ -164,6 +164,24 @@ export function createActiveBlueprint(): Blueprint {
     ],
     parts,
     connections,
+    sensors: [
+      {
+        id: 'sensor-core-internal', kind: 'proprioception', partId: 'part-core',
+        localPose: pose(0, 0, 0), forward: vector(0, 0, -1),
+        updatePeriodTicks: 1, latencyTicks: 0, noise: { standardDeviation: 0 }, resolution: 100,
+      },
+      {
+        id: 'sensor-end-contact', kind: 'contact', partId: 'part-1-c',
+        localPose: pose(0, 0, 0), forward: vector(0, -1, 0),
+        updatePeriodTicks: 1, latencyTicks: 0, noise: { standardDeviation: 0 }, range: 0.22, resolution: 100,
+      },
+      {
+        id: 'sensor-forward-range', kind: 'range', partId: 'part-1-a',
+        localPose: pose(0, 0, -0.16), forward: vector(0, 0, -1),
+        updatePeriodTicks: 3, latencyTicks: 0, noise: { standardDeviation: 0.02 },
+        range: 5, fieldOfViewRadians: Math.PI / 3, resolution: 7,
+      },
+    ],
     actuators: connections.map((connection): JointActuator => ({
       id: `actuator-${connection.id}`,
       connectionId: connection.id,
