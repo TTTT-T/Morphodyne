@@ -36,7 +36,7 @@ See:
 
 ## Status
 
-**Pre-alpha / Phase 1 structural physics complete. Phase 2 next.**
+**Pre-alpha / Phase 2 active body complete. Phase 3 next.**
 
 The project currently prioritizes correct interfaces, modularity, causal correctness, and testability over visual fidelity or content volume.
 
