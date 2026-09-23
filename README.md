@@ -46,8 +46,10 @@ The project currently prioritizes correct interfaces, modularity, causal correct
 ```bash
 git clone https://github.com/TTTT-T/Morphodyne.git
 cd Morphodyne
-npm install
+npm ci
 npm run dev
 ```
 
-The starter scene intentionally stays minimal: a Rapier-driven rigid body rendered by Three.js. It exists only to prove the rendering/physics boundary before Morphodyne's domain model is layered on top.
+The Phase 0 smoke scene intentionally stays minimal: a Rapier-driven rigid body rendered by Three.js. Its overlay shows the simulation tick and cube height. The cube should settle near y=0.5 on the ground. It proves adapter wiring, while Blueprint-to-body mapping remains Phase 1 work.
+
+Run `npm test`, `npm run typecheck`, and `npm run build` for the Mac acceptance checks. See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) for module boundaries and bootstrap scripts.

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+cd "$(dirname "$0")/.."
 echo "Morphodyne Phase 0 bootstrap (macOS)"
 echo
-df -h /
+df -h .
 echo
 
 if ! command -v git >/dev/null 2>&1; then
@@ -24,9 +25,12 @@ fi
 echo "git:  $(git --version)"
 echo "node: $(node --version)"
 echo "npm:  $(npm --version)"
+node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (!((major === 22 && minor >= 12) || major === 24 || major >= 26)) { console.error("Node.js 22.12+, 24.x or 26+ is required by the pinned toolchain."); process.exit(1); }'
 echo
-echo "Installing project-local dependencies..."
-npm install
+echo "Project dependencies are local (node_modules); free space and footprint:"
+du -sh node_modules 2>/dev/null || true
+echo "Installing from package-lock.json..."
+npm ci --no-audit --no-fund
 echo
 echo "Running tests, typecheck, and build..."
 npm run test
