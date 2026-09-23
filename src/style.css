@@ -1,0 +1,21 @@
+html, body, #app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #111;
+}
+
+canvas { display: block; }
+
+.status {
+  position: fixed;
+  left: 16px;
+  top: 16px;
+  z-index: 10;
+  padding: 8px 10px;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #eee;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 6px;
+}
