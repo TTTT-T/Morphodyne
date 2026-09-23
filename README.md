@@ -36,7 +36,7 @@ See:
 
 ## Status
 
-**Pre-alpha / Phase 4 sensor and perception implementation awaiting review.**
+**Pre-alpha / Phase 4 sensor and perception complete. Phase 5 next.**
 
 The project currently prioritizes correct interfaces, modularity, causal correctness, and testability over visual fidelity or content volume.
 
