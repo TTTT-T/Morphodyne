@@ -95,8 +95,9 @@ The primary Mac has limited internal storage. Treat disk usage as a hard enginee
 
 The main agent is the project lead. It should control the overall objective, architecture, task decomposition, integration, and final review rather than personally implementing every bounded task.
 
-- Prefer delegating well-scoped implementation, research, refactoring, test-writing, and investigation tasks to Luna subagents when Luna is available and delegation is likely to save time.
+- Prefer delegating well-scoped implementation, research, refactoring, test-writing, and investigation tasks to subagents using the `gpt6-luna` model when delegation is likely to save time.
 - Keep the main agent focused on the critical path: deciding what matters next, preserving architectural consistency, integrating results, and resolving cross-module tradeoffs.
+- Use `gpt6-luna` as the default subagent model for delegated Morphodyne work unless the user explicitly overrides it.
 - Give subagents narrow objectives, relevant constraints, expected outputs, and clear file/module ownership.
 - Subagents may propose local improvements but must not silently redefine project architecture or core principles.
 - Parallelize independent tasks when practical, but avoid coordination overhead that costs more time than it saves.
