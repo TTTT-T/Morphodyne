@@ -1,0 +1,60 @@
+/**
+ * A normalized command addressed to one actuator.
+ *
+ * A control signal is an input to an actuator. It does not describe an
+ * action or guarantee a physical outcome.
+ */
+export interface ControlSignal {
+  readonly actuatorId: string;
+  readonly value: number;
+}
+
+/** Backend-independent actuator description. Output units belong to the concrete actuator. */
+export interface Actuator {
+  readonly id: string;
+  /** Maximum magnitude of the actuator output in its implementation's units. */
+  readonly maxOutput: number;
+  /** Optional first-order response time in seconds. */
+  readonly responseTimeSeconds?: number;
+}
+
+/**
+ * An actuator whose output is applied through a revolute or prismatic
+ * Connection. Revolute output is torque (N·m); prismatic output is force (N).
+ */
+export interface JointActuator extends Actuator {
+  readonly connectionId: string;
+}
+
+/** Minimal energy observation shared by different energy mechanisms. */
+export interface EnergySource {
+  /** Currently available power in watts. */
+  readonly availablePowerWatts: number;
+}
+
+/**
+ * A reusable body-control mapping. It produces actuator signals only; physics
+ * decides whether those signals produce the intended result.
+ */
+export interface MotorPrimitive<Input = number> {
+  readonly id: string;
+  readonly actuatorIds: readonly string[];
+  /** Input and every emitted signal value are normalized to [-1, 1]. */
+  readonly generateSignals: (input: Input) => readonly ControlSignal[];
+}
+
+export function validateControlSignal(signal: ControlSignal): string[] {
+  const errors: string[] = [];
+  if (!signal.actuatorId.trim()) errors.push('Control signal actuator id is required');
+  if (!Number.isFinite(signal.value) || signal.value < -1 || signal.value > 1) {
+    errors.push(`Invalid control signal value: ${signal.actuatorId}`);
+  }
+  return errors;
+}
+
+/** Create a normalized signal and reject an invalid control input early. */
+export function createControlSignal(actuatorId: string, value: number): ControlSignal {
+  const errors = validateControlSignal({ actuatorId, value });
+  if (errors.length) throw new Error(errors.join('; '));
+  return { actuatorId, value };
+}

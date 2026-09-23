@@ -1,3 +1,5 @@
+import type { JointActuator } from './actuation';
+
 /** Stable identity is supplied by the caller; the core never invents semantic identities. */
 export type EntityId = string;
 
@@ -81,6 +83,8 @@ export interface Blueprint {
   readonly materials: readonly Material[];
   readonly parts: readonly Part[];
   readonly connections: readonly Connection[];
+  /** Optional actuator declarations; omitted for passive structures. */
+  readonly actuators?: readonly JointActuator[];
 }
 
 export interface Entity {
@@ -260,6 +264,23 @@ export function validateBlueprint(blueprint: Blueprint): string[] {
     const limits = runtimeOptions.limits;
     if (limits !== undefined && (!Number.isFinite(limits.min) || !Number.isFinite(limits.max) || limits.min > limits.max)) {
       errors.push(`Invalid connection limits: ${connection.id}`);
+    }
+  }
+
+  const actuatorIds = new Set<string>();
+  const connections = new Map(blueprint.connections.map((connection) => [connection.id, connection]));
+  for (const actuator of blueprint.actuators ?? []) {
+    if (!actuator.id.trim() || actuatorIds.has(actuator.id)) errors.push(`Invalid or duplicate actuator id: ${actuator.id}`);
+    actuatorIds.add(actuator.id);
+    if (!Number.isFinite(actuator.maxOutput) || actuator.maxOutput <= 0) errors.push(`Invalid actuator maxOutput: ${actuator.id}`);
+    if (actuator.responseTimeSeconds !== undefined
+      && (!Number.isFinite(actuator.responseTimeSeconds) || actuator.responseTimeSeconds <= 0)) {
+      errors.push(`Invalid actuator responseTimeSeconds: ${actuator.id}`);
+    }
+    const connection = connections.get(actuator.connectionId);
+    if (!connection) errors.push(`Unknown actuator connection: ${actuator.id}`);
+    else if (connection.kind !== 'revolute' && connection.kind !== 'prismatic') {
+      errors.push(`Actuator requires a revolute or prismatic connection: ${actuator.id}`);
     }
   }
   return errors;
