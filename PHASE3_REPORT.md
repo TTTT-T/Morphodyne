@@ -33,4 +33,4 @@ Windows was not run; Mac is the required development and browser environment her
 
 Implementation spans `src/core`, `src/physics`, `src/simulation`, `src/tools`, `src/main.ts`, and `src/style.css`. Review the Phase 3 branch and pull request against `main`; do not begin Phase 4 before acceptance.
 
-Implementation commits: `9080546` (Core), `926cfae` (Rapier), `2df6566` (simulation and browser). Pull request: pending.
+Implementation commits: `9080546` (Core), `926cfae` (Rapier), `2df6566` (simulation and browser). Pull request: [#6 — Phase 3: structural damage and dependency](https://github.com/TTTT-T/Morphodyne/pull/6), targeting `main`.
