@@ -13,10 +13,20 @@ interface RuntimeConnection {
   readonly toAnchor: Vector3;
   readonly initialPosition?: number;
   readonly initialRelativeRotation?: Quaternion;
+  jointHandle?: number;
+  broken: boolean;
 }
 
 interface RuntimePhysicsBody {
   readonly connections: ReadonlyMap<string, RuntimeConnection>;
+  readonly connectionHandles: Map<string, number>;
+  readonly latestPartImpulses: Map<string, number>;
+  readonly pendingPartImpulses: Map<string, number>;
+}
+
+interface PartRuntimeReference {
+  readonly runtimeBody: RuntimePhysicsBody;
+  readonly partId: string;
 }
 
 function colliderFor(part: Part, material: Material): RAPIER.ColliderDesc {
@@ -39,6 +49,8 @@ function colliderFor(part: Part, material: Material): RAPIER.ColliderDesc {
       break;
   }
   descriptor.setFriction(material.friction).setRestitution(material.restitution);
+  descriptor.setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
+    .setContactForceEventThreshold(0);
   if (part.mass === undefined) descriptor.setDensity(material.density);
   else descriptor.setMass(part.mass);
   return descriptor;
@@ -159,8 +171,12 @@ function jointFor(connection: Connection, fromPart: Part, toPart: Part): RAPIER.
 
 export class RapierPhysicsAdapter implements PhysicsAdapter {
   private readonly world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+  private readonly eventQueue = new RAPIER.EventQueue(true);
   private readonly bodies = new Map<BodyHandle, RAPIER.RigidBody>();
   private readonly runtimeBodies = new WeakMap<PhysicsBody, RuntimePhysicsBody>();
+  private readonly activeRuntimeBodies = new Set<RuntimePhysicsBody>();
+  private readonly partRuntimeReferences = new Map<BodyHandle, PartRuntimeReference>();
+  private readonly colliderRuntimeReferences = new Map<number, PartRuntimeReference>();
   private readonly actuatedBodies = new Set<RAPIER.RigidBody>();
   private nextHandle = 1;
 
@@ -176,7 +192,10 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     const descriptor = spec.dynamic ? RAPIER.RigidBodyDesc.dynamic() : RAPIER.RigidBodyDesc.fixed();
     descriptor.setTranslation(spec.position.x, spec.position.y, spec.position.z);
     const body = this.world.createRigidBody(descriptor);
-    this.world.createCollider(RAPIER.ColliderDesc.cuboid(x, y, z), body);
+    const collider = RAPIER.ColliderDesc.cuboid(x, y, z);
+    collider.setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
+      .setContactForceEventThreshold(0);
+    this.world.createCollider(collider, body);
     const handle = this.nextHandle++;
     this.bodies.set(handle, body);
     return handle;
@@ -199,15 +218,17 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     ]));
     const partHandles = new Map<string, BodyHandle>();
     const connectionHandles = new Map<string, number>();
+    const partColliders = new Map<string, RAPIER.Collider>();
     for (const part of entity.blueprint.parts) {
       const { position, rotation } = part.pose;
       const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(position.x + origin.x, position.y + origin.y, position.z + origin.z)
         .setRotation(rotation));
-      this.world.createCollider(colliders.get(part.id)!, body);
+      const collider = this.world.createCollider(colliders.get(part.id)!, body);
       const handle = this.nextHandle++;
       this.bodies.set(handle, body);
       partHandles.set(part.id, handle);
+      partColliders.set(part.id, collider);
     }
     for (const connection of entity.blueprint.connections) {
       const from = this.bodies.get(partHandles.get(connection.fromPartId)!)!;
@@ -242,8 +263,16 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
         to: this.bodies.get(partHandles.get(connection.toPartId)!)!,
         fromAnchor: connection.fromAnchor,
         toAnchor: connection.toAnchor,
+        jointHandle: connectionHandles.get(connection.id)!,
+        broken: false,
       });
     }
+    const runtimeBody: RuntimePhysicsBody = {
+      connections: runtimeConnections,
+      connectionHandles,
+      latestPartImpulses: new Map(entity.blueprint.parts.map((part) => [part.id, 0])),
+      pendingPartImpulses: new Map(),
+    };
     const physicsBody: PhysicsBody = {
       entityId: entity.id,
       partHandles,
@@ -254,7 +283,13 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
         return this.readPose(handle);
       },
     };
-    this.runtimeBodies.set(physicsBody, { connections: runtimeConnections });
+    this.runtimeBodies.set(physicsBody, runtimeBody);
+    this.activeRuntimeBodies.add(runtimeBody);
+    for (const part of entity.blueprint.parts) {
+      const reference = { runtimeBody, partId: part.id };
+      this.partRuntimeReferences.set(partHandles.get(part.id)!, reference);
+      this.colliderRuntimeReferences.set(partColliders.get(part.id)!.handle, reference);
+    }
     return physicsBody;
   }
 
@@ -263,6 +298,14 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     const body = this.bodies.get(handle);
     if (!body) throw new Error(`Unknown body handle: ${handle}`);
     body.applyImpulse(impulse, true);
+    const reference = this.partRuntimeReferences.get(handle);
+    if (reference) {
+      const magnitude = Math.hypot(impulse.x, impulse.y, impulse.z);
+      reference.runtimeBody.pendingPartImpulses.set(
+        reference.partId,
+        (reference.runtimeBody.pendingPartImpulses.get(reference.partId) ?? 0) + magnitude,
+      );
+    }
   }
 
   applyTorqueImpulse(handle: BodyHandle, torque: Vector3): void {
@@ -272,12 +315,34 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     body.applyTorqueImpulse(torque, true);
   }
 
+  readPartImpactImpulse(body: PhysicsBody, partId: string): number {
+    const runtimeBody = this.runtimeBodies.get(body);
+    if (!runtimeBody) throw new Error('Unknown physics body');
+    if (!runtimeBody.latestPartImpulses.has(partId)) throw new Error(`Unknown part id: ${partId}`);
+    return runtimeBody.latestPartImpulses.get(partId)!;
+  }
+
+  breakConnection(body: PhysicsBody, connectionId: string): void {
+    const runtimeBody = this.runtimeBodies.get(body);
+    if (!runtimeBody) throw new Error('Unknown physics body');
+    const connection = runtimeBody.connections.get(connectionId);
+    if (!connection) throw new Error(`Unknown connection id: ${connectionId}`);
+    if (connection.broken) return;
+    if (connection.jointHandle !== undefined && this.world.impulseJoints.contains(connection.jointHandle)) {
+      this.world.impulseJoints.remove(connection.jointHandle, true);
+    }
+    connection.jointHandle = undefined;
+    connection.broken = true;
+    runtimeBody.connectionHandles.delete(connectionId);
+  }
+
   applyJointOutput(body: PhysicsBody, connectionId: string, output: number): void {
     if (!Number.isFinite(output)) throw new Error('Joint output must be finite');
     const runtimeBody = this.runtimeBodies.get(body);
     if (!runtimeBody) throw new Error('Unknown physics body');
     const connection = runtimeBody.connections.get(connectionId);
     if (!connection) throw new Error(`Unknown connection id: ${connectionId}`);
+    if (connection.broken) return;
     if (connection.kind === 'rigid' || !connection.axis) {
       throw new Error(`Cannot actuate rigid connection: ${connectionId}`);
     }
@@ -302,6 +367,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     if (!runtimeBody) throw new Error('Unknown physics body');
     const connection = runtimeBody.connections.get(connectionId);
     if (!connection) throw new Error(`Unknown connection id: ${connectionId}`);
+    if (connection.broken) return 0;
     if (connection.kind === 'rigid' || !connection.axis) {
       throw new Error(`Cannot read velocity of rigid connection: ${connectionId}`);
     }
@@ -331,6 +397,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     if (!runtimeBody) throw new Error('Unknown physics body');
     const connection = runtimeBody.connections.get(connectionId);
     if (!connection) throw new Error(`Unknown connection id: ${connectionId}`);
+    if (connection.broken) return 0;
     if (connection.kind === 'rigid' || !connection.axis) {
       throw new Error(`Cannot read position of rigid connection: ${connectionId}`);
     }
@@ -356,8 +423,36 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
 
   step(seconds: number): void {
     if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('Physics step must be positive and finite');
+    for (const runtimeBody of this.activeRuntimeBodies) {
+      for (const partId of runtimeBody.latestPartImpulses.keys()) runtimeBody.latestPartImpulses.set(partId, 0);
+    }
     this.world.timestep = seconds;
-    this.world.step();
+    this.world.step(this.eventQueue);
+    this.eventQueue.drainContactForceEvents((event) => {
+      const impulse = event.totalForceMagnitude() * seconds;
+      if (!Number.isFinite(impulse) || impulse <= 0) return;
+      const references = [
+        this.colliderRuntimeReferences.get(event.collider1()),
+        this.colliderRuntimeReferences.get(event.collider2()),
+      ];
+      for (const reference of references) {
+        if (!reference) continue;
+        const { runtimeBody, partId } = reference;
+        runtimeBody.latestPartImpulses.set(
+          partId,
+          (runtimeBody.latestPartImpulses.get(partId) ?? 0) + impulse,
+        );
+      }
+    });
+    for (const runtimeBody of this.activeRuntimeBodies) {
+      for (const [partId, impulse] of runtimeBody.pendingPartImpulses) {
+        runtimeBody.latestPartImpulses.set(
+          partId,
+          (runtimeBody.latestPartImpulses.get(partId) ?? 0) + impulse,
+        );
+      }
+      runtimeBody.pendingPartImpulses.clear();
+    }
     // Rapier user forces and torques persist until reset. Outputs are scoped
     // to the step for which the controller submitted them, so clear only the
     // bodies touched by joint outputs after integration.
