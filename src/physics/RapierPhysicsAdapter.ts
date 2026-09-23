@@ -1,7 +1,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { Connection, Entity, Material, Part, Pose, Quaternion, Vector3 } from '../core/model';
 import { validateBlueprint } from '../core/model';
-import type { BodyHandle, BoxSpec, PhysicsAdapter } from './PhysicsAdapter';
+import type { BodyHandle, BoxSpec, PhysicalContact, PhysicsAdapter, RayHit } from './PhysicsAdapter';
 import type { PhysicsBody } from './PhysicsBody';
 
 interface RuntimeConnection {
@@ -22,6 +22,8 @@ interface RuntimePhysicsBody {
   readonly connectionHandles: Map<string, number>;
   readonly latestPartImpulses: Map<string, number>;
   readonly pendingPartImpulses: Map<string, number>;
+  readonly latestContacts: Map<string, PhysicalContact[]>;
+  readonly partColliders: ReadonlyMap<string, RAPIER.Collider>;
 }
 
 interface PartRuntimeReference {
@@ -272,6 +274,8 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       connectionHandles,
       latestPartImpulses: new Map(entity.blueprint.parts.map((part) => [part.id, 0])),
       pendingPartImpulses: new Map(),
+      latestContacts: new Map(entity.blueprint.parts.map((part) => [part.id, []])),
+      partColliders,
     };
     const physicsBody: PhysicsBody = {
       entityId: entity.id,
@@ -320,6 +324,42 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     if (!runtimeBody) throw new Error('Unknown physics body');
     if (!runtimeBody.latestPartImpulses.has(partId)) throw new Error(`Unknown part id: ${partId}`);
     return runtimeBody.latestPartImpulses.get(partId)!;
+  }
+
+  readPartContacts(body: PhysicsBody, partId: string): readonly PhysicalContact[] {
+    const runtimeBody = this.runtimeBodies.get(body);
+    if (!runtimeBody) throw new Error('Unknown physics body');
+    const contacts = runtimeBody.latestContacts.get(partId);
+    if (!contacts) throw new Error(`Unknown part id: ${partId}`);
+    return contacts;
+  }
+
+  readPartAngularVelocity(body: PhysicsBody, partId: string): Vector3 {
+    const handle = body.partHandles.get(partId);
+    if (handle === undefined || !this.runtimeBodies.has(body)) throw new Error(`Unknown part id: ${partId}`);
+    const velocity = this.bodies.get(handle)!.angvel();
+    return { x: velocity.x, y: velocity.y, z: velocity.z };
+  }
+
+  castSensorRay(origin: Vector3, direction: Vector3, range: number, excludeBody: PhysicsBody): RayHit | null {
+    if (![origin.x, origin.y, origin.z, direction.x, direction.y, direction.z, range].every(Number.isFinite)
+      || range <= 0 || Math.abs(Math.hypot(direction.x, direction.y, direction.z) - 1) > 1e-5) {
+      throw new Error('Invalid sensor ray');
+    }
+    const runtimeBody = this.runtimeBodies.get(excludeBody);
+    if (!runtimeBody) throw new Error('Unknown physics body');
+    const own = new Set([...runtimeBody.partColliders.values()].map((collider) => collider.handle));
+    const hit = this.world.castRay(new RAPIER.Ray(origin, direction), range, true,
+      undefined, undefined, undefined, undefined, (collider) => !own.has(collider.handle));
+    if (!hit) return null;
+    return {
+      distance: hit.timeOfImpact,
+      point: {
+        x: origin.x + direction.x * hit.timeOfImpact,
+        y: origin.y + direction.y * hit.timeOfImpact,
+        z: origin.z + direction.z * hit.timeOfImpact,
+      },
+    };
   }
 
   breakConnection(body: PhysicsBody, connectionId: string): void {
@@ -425,9 +465,24 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('Physics step must be positive and finite');
     for (const runtimeBody of this.activeRuntimeBodies) {
       for (const partId of runtimeBody.latestPartImpulses.keys()) runtimeBody.latestPartImpulses.set(partId, 0);
+      for (const contacts of runtimeBody.latestContacts.values()) contacts.length = 0;
     }
     this.world.timestep = seconds;
     this.world.step(this.eventQueue);
+    for (const runtimeBody of this.activeRuntimeBodies) {
+      for (const [partId, collider] of runtimeBody.partColliders) {
+        const contacts = runtimeBody.latestContacts.get(partId)!;
+        this.world.contactPairsWith(collider, (other) => {
+          this.world.contactPair(collider, other, (manifold) => {
+            for (let i = 0; i < manifold.numSolverContacts(); i += 1) {
+              const point = manifold.solverContactPoint(i);
+              if (!point) continue;
+              contacts.push({ point: { x: point.x, y: point.y, z: point.z }, impulseNs: Math.max(0, manifold.contactImpulse(i)) });
+            }
+          });
+        });
+      }
+    }
     this.eventQueue.drainContactForceEvents((event) => {
       const impulse = event.totalForceMagnitude() * seconds;
       if (!Number.isFinite(impulse) || impulse <= 0) return;
