@@ -81,21 +81,20 @@ Muscles and motors may both implement an actuator interface while retaining diff
 
 Initial stack:
 
-- Unity 6.3 LTS
-- C#
-- Unity 3D Physics / PhysX
-- Rigidbody
-- ConfigurableJoint and basic Joint types
-- Primitive / Convex colliders
-- Script-controlled simulation tick
-- URP with minimal visuals
+- TypeScript
+- Three.js for rendering and debug visualization
+- Rapier 3D for rigid-body physics, colliders, joints, forces, impulses, and CCD
+- Vite for local development and production builds
+- Browser runtime with WebGL/WebGPU selected by the rendering layer as appropriate
+- Fixed-step simulation owned by Morphodyne
 
 Not part of the initial implementation:
 
-- DOTS/ECS
+- React or other UI frameworks unless Phase 8 needs them
+- ECS
 - Full soft-body simulation
 - FEM
-- ML-Agents
+- deep reinforcement learning
 - LLM-driven control
 - high-fidelity weather
 - large-scale ecosystem simulation
@@ -105,16 +104,21 @@ Not part of the initial implementation:
 ```text
 God Sandbox UI / Debug Tools
             ↓
-Simulation Core
+Morphodyne Simulation Core
             ↓
 Physics Adapter
             ↓
-Unity / PhysX
+Rapier 3D
+
+Rendering observes the world through:
+Morphodyne World State → Render Adapter → Three.js
 ```
 
-The Simulation Core should be pure C# wherever practical and must not depend on `MonoBehaviour`, `GameObject`, `Transform`, or other Unity runtime types.
+The Simulation Core must remain framework-independent TypeScript wherever practical. It must not depend directly on Three.js scene objects or Rapier runtime objects.
 
-Unity is the first physics execution backend, not the owner of world rules.
+Three.js owns presentation. Rapier executes physics. Morphodyne owns simulation semantics, structural rules, causal state, and agent logic.
+
+This separation is deliberate so a future renderer or physics backend can be replaced without rewriting the world model.
 
 ---
 
@@ -547,7 +551,7 @@ Requirements:
 
 Agents control inputs, not outcomes. Physics has final authority.
 
-Do not assume cross-platform bitwise PhysX determinism. Future replay/branching should use:
+Do not assume cross-platform bitwise determinism from the default Rapier build. Future replay/branching should use:
 
 **World Snapshot + Event Stream + Seeded Agent RNG.**
 
