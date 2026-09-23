@@ -96,16 +96,17 @@ For Phase 0, Windows setup is optional and must not delay the Mac-first implemen
 
 ## Phase 0 minimum deliverables
 
-- Unity project foundation.
-- Core / PhysicsAdapter / Simulation / Tools module boundaries.
-- Pure-C# Core assembly.
+- Vite + TypeScript project foundation.
+- Three.js rendering shell.
+- Rapier 3D physics shell.
+- Core / PhysicsAdapter / Rendering / Simulation / Tools module boundaries.
+- Framework-independent TypeScript Core.
 - Unit-test infrastructure.
 - Minimal Physics Adapter shell.
 - Basic logging conventions.
 - Mac environment audit and build/test path.
 - `scripts/bootstrap-mac.sh`.
-- `scripts/bootstrap-windows.ps1` only if later cross-platform validation requires it.
-- Windows Unity pull/open/run path.
+- Minimal browser smoke scene.
 - Initial minimal Core concepts only:
   - EntityId
   - Entity
