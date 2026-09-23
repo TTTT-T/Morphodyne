@@ -16,6 +16,17 @@ export interface PhysicsAdapter {
   applyImpulse(handle: BodyHandle, impulse: Vector3): void;
   applyTorqueImpulse(handle: BodyHandle, torque: Vector3): void;
   /**
+   * Read the physical impulse magnitude accumulated for one Part during the
+   * most recent completed step. The value is in N*s and is zero when that
+   * Part had no recorded external impulse or contact force in that step.
+   */
+  readPartImpactImpulse(body: PhysicsBody, partId: string): number;
+  /**
+   * Remove one runtime structural connection from the physics world. The
+   * connected rigid bodies remain alive as independent bodies after removal.
+   */
+  breakConnection(body: PhysicsBody, connectionId: string): void;
+  /**
    * Apply one actuator output to a joint for the next physics step.
    *
    * `output` is a force magnitude for a prismatic connection and a torque
