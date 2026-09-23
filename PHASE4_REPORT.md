@@ -32,4 +32,4 @@ Range samples are anonymous first-hit rays, not object recognition or a count of
 
 Windows was not run; Mac is the required environment for this Phase. The existing large Rapier-containing JavaScript chunk warning remains nonblocking. The agent-facing type is a contract for the future Brain, not a security sandbox against arbitrary application code; Phase 5 must accept the perception view rather than a PhysicsAdapter or runtime body.
 
-Implementation touches `src/core`, `src/physics`, `src/simulation`, `src/tools`, `src/rendering`, `src/main.ts`, and `src/style.css`. Implementation commits: `2ef7781`, `bd5fee5`, and `9bc5cb8`. Pull request: pending creation against `main`.
+Implementation touches `src/core`, `src/physics`, `src/simulation`, `src/tools`, `src/rendering`, `src/main.ts`, and `src/style.css`. Implementation commits: `2ef7781`, `bd5fee5`, and `9bc5cb8`; report commit: `278c257`. Pull request: [#7 — Phase 4: sensor and perception boundary](https://github.com/TTTT-T/Morphodyne/pull/7), targeting `main`.
