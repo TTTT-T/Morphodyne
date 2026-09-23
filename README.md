@@ -22,7 +22,7 @@ The first milestone is not a rich ecosystem or polished game. It is a small, tes
 
 `Structure → Capability → Perception → Decision → Control → Physics → Damage → Learning`
 
-The initial implementation uses Unity 6.3 LTS, C#, PhysX rigid-body physics, modular pure-C# simulation core logic, and a Unity physics adapter.
+The initial implementation uses TypeScript, Three.js, Rapier 3D, and Vite. Three.js is the rendering layer; Rapier is the physics execution backend; Morphodyne owns the simulation semantics and universal rules.
 
 ## Development model
 
@@ -36,6 +36,18 @@ See:
 
 ## Status
 
-**Pre-alpha / Phase 0 foundation.**
+**Pre-alpha / Phase 0 foundation — Three.js/Rapier technical pivot.**
 
 The project currently prioritizes correct interfaces, modularity, causal correctness, and testability over visual fidelity or content volume.
+
+
+## Quick start
+
+```bash
+git clone https://github.com/TTTT-T/Morphodyne.git
+cd Morphodyne
+npm install
+npm run dev
+```
+
+The starter scene intentionally stays minimal: a Rapier-driven rigid body rendered by Three.js. It exists only to prove the rendering/physics boundary before Morphodyne's domain model is layered on top.

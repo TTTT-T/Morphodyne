@@ -8,8 +8,8 @@ Current scope is **Phase 0 only**. Do not begin Phase 1 work before explicit acc
 
 1. Prioritize correct universal interfaces and basic rules over feature breadth.
 2. Keep the project modular. Break work into small independently testable tasks.
-3. Keep Core Simulation as pure C# wherever practical. Core must not depend on `MonoBehaviour`, `GameObject`, `Transform`, or UnityEngine runtime types.
-4. Unity / PhysX must be accessed through a Physics Adapter boundary. Core world rules must not depend on Unity implementation details.
+3. Keep Core Simulation as framework-independent TypeScript wherever practical. Core must not depend directly on Three.js or Rapier runtime types.
+4. Rapier must be accessed through the Physics Adapter boundary, and Three.js through the Render Adapter boundary. Core world rules must not depend on either implementation.
 5. Concrete animals, machines, or scenes must not bypass universal rules through object-specific logic.
 6. Do not introduce predefined capability properties such as `canWalk`, `attackPower`, `biteDamage`, or `moveSpeed`.
 7. Do not implement animals, AI, detailed Damage, rich editor tooling, or later-phase features merely to produce an early demo.
@@ -22,11 +22,10 @@ Current scope is **Phase 0 only**. Do not begin Phase 1 work before explicit acc
 ## Development environment
 
 - Codex runs on the Mac mini.
-- Mac is the primary code-development, Git, documentation, and pure-C# test environment.
-- Windows PC is on the same LAN and is responsible for Unity 6.3 LTS / PhysX integration and later performance validation.
-- Each machine should keep its own local repository clone and synchronize through Git.
-- Do not run the Unity project directly from an SMB network-shared project directory.
-- If practical, establish Mac → Windows SSH-based validation, but this must not block the core Phase 0 foundation.
+- Mac is the primary code-development, Git, documentation, and framework-independent TypeScript test environment.
+- Mac is sufficient for Phase 0 development and validation.
+- Windows may be used later for cross-platform or performance validation, but must not block Phase 0.
+- Each machine may keep its own local repository clone and synchronize through Git.
 
 ### Environment setup policy
 
@@ -43,10 +42,10 @@ Before installing or changing anything:
 
 The Mac has limited internal storage. Treat storage use as a hard constraint:
 
-- Do not install Unity Editor or Unity platform modules on Mac for Phase 0.
+- Do not install Unity Editor for this project.
 - Do not install Android/iOS toolchains, local AI models, Docker images, or other heavyweight dependencies unless explicitly required by a later Phase and approved by the user.
-- Keep Mac dependencies limited to Codex, Git, minimum required .NET tooling, SSH, source code, documentation, and lightweight test dependencies.
-- Prefer all Unity/PhysX integration, builds, large caches, binary assets, and heavyweight validation on Windows.
+- Keep Mac dependencies limited to Codex, Git, Node.js/npm, source code, documentation, and lightweight test dependencies.
+- Keep the browser/Node toolchain lightweight and project-local where practical.
 - Avoid duplicate SDK versions.
 - Before any nontrivial installation, check free disk space and identify expected disk impact.
 - Generated build outputs and caches must remain removable and must not be committed.
@@ -66,7 +65,7 @@ The bootstrap scripts should, where practical:
 - document required versions or accepted version ranges;
 - be safe to re-run.
 
-For Phase 0, the Windows bootstrap may initially be a validation/setup helper rather than a fully unattended Unity installer if unattended installation would add unnecessary complexity or require credentials/licensing interaction.
+For Phase 0, Windows setup is optional and must not delay the Mac-first implementation.
 
 ## Phase 0 execution request
 
@@ -77,7 +76,7 @@ For Phase 0, the Windows bootstrap may initially be a validation/setup helper ra
 5. Produce an internal Phase 0 task breakdown with explicit acceptance criteria.
 6. If there is no blocking architectural issue, begin Phase 0 directly.
 7. Run all executable tests after implementation.
-8. Perform Windows / Unity validation when the environment is available; if it is blocked by a clearly documented external prerequisite, report the exact blocker rather than fabricating a result.
+8. Perform Mac browser validation. Windows validation is optional during Phase 0.
 9. Produce `PHASE0_REPORT.md` containing at minimum:
    - implemented work
    - final directory structure
@@ -88,7 +87,7 @@ For Phase 0, the Windows bootstrap may initially be a validation/setup helper ra
    - bootstrap script status
    - test results
    - Mac validation results
-   - Windows / Unity validation results
+   - browser / cross-platform validation results
    - known issues
    - any deviation from Architecture / Roadmap
    - recommendation on whether Phase 1 should begin
@@ -97,16 +96,17 @@ For Phase 0, the Windows bootstrap may initially be a validation/setup helper ra
 
 ## Phase 0 minimum deliverables
 
-- Unity project foundation.
-- Core / PhysicsAdapter / Simulation / Tools module boundaries.
-- Pure-C# Core assembly.
+- Vite + TypeScript project foundation.
+- Three.js rendering shell.
+- Rapier 3D physics shell.
+- Core / PhysicsAdapter / Rendering / Simulation / Tools module boundaries.
+- Framework-independent TypeScript Core.
 - Unit-test infrastructure.
 - Minimal Physics Adapter shell.
 - Basic logging conventions.
 - Mac environment audit and build/test path.
 - `scripts/bootstrap-mac.sh`.
-- `scripts/bootstrap-windows.ps1`.
-- Windows Unity pull/open/run path.
+- Minimal browser smoke scene.
 - Initial minimal Core concepts only:
   - EntityId
   - Entity
