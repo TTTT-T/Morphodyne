@@ -4,6 +4,7 @@ import type { Entity, Pose } from './core/model';
 import { RapierPhysicsAdapter } from './physics/RapierPhysicsAdapter';
 import { ThreeSmokeRenderer } from './rendering/ThreeSmokeRenderer';
 import { ActiveBodyController, type ControlIntent, type JointFeedback } from './simulation/ActiveBodyController';
+import { BrainRuntime, skillIntentToControlIntent, type BrainSnapshot } from './simulation/BrainRuntime';
 import { FixedStepSimulation } from './simulation/FixedStepSimulation';
 import { JointActuatorRuntime } from './simulation/JointActuatorRuntime';
 import { SensorRuntime } from './simulation/SensorRuntime';
@@ -27,6 +28,9 @@ async function main(): Promise<void> {
   const sensorStatus = document.createElement('div');
   sensorStatus.className = 'sensor-status';
   panel.append(sensorStatus);
+  const brainStatus = document.createElement('div');
+  brainStatus.className = 'brain-status';
+  panel.append(brainStatus);
   const controls = document.createElement('div');
   controls.className = 'controls';
   panel.append(controls);
@@ -75,20 +79,27 @@ async function main(): Promise<void> {
   const actuatorRuntime = new JointActuatorRuntime(entity.blueprint, physics, body, { availablePowerWatts: 400 });
   const damageRuntime = new StructuralDamageRuntime(entity.blueprint, physics, body);
   const sensorRuntime = new SensorRuntime(entity.blueprint, 'part-core', physics, body, () => damageRuntime.state);
+  const brain = new BrainRuntime();
+  let brainSnapshot: BrainSnapshot | null = null;
+  let autonomous = true;
   let intent: ControlIntent = { forward: 0, turn: 0 };
-  let mode = 'Stand';
+  let mode = 'Auto · Stand';
   const projectiles: number[] = [];
 
   function addButton(label: string, next: ControlIntent): void {
     const button = document.createElement('button');
     button.textContent = label;
-    button.addEventListener('click', () => { intent = next; mode = label; });
+    button.addEventListener('click', () => { autonomous = false; intent = next; mode = label; });
     controls.append(button);
   }
   addButton('Stand', { forward: 0, turn: 0 });
   addButton('Forward', { forward: 1, turn: 0 });
   addButton('Turn left', { forward: 0, turn: -1 });
   addButton('Turn right', { forward: 0, turn: 1 });
+  const autoButton = document.createElement('button');
+  autoButton.textContent = 'Auto brain';
+  autoButton.addEventListener('click', () => { autonomous = true; });
+  controls.append(autoButton);
   const damageButton = document.createElement('button');
   damageButton.textContent = 'Impact / Damage';
   damageButton.addEventListener('click', () => {
@@ -121,7 +132,15 @@ async function main(): Promise<void> {
   controls.append(impactButton);
 
   const simulation = new FixedStepSimulation(physics, (seconds) => {
-    const perception = sensorRuntime.readAgentView().perceptions;
+    const view = sensorRuntime.readAgentView();
+    if (view.tick >= 0) {
+      brainSnapshot = brain.update(view);
+      if (autonomous) {
+        intent = skillIntentToControlIntent(brainSnapshot.skillIntent);
+        mode = `Auto · ${brainSnapshot.skillIntent.skill}`;
+      }
+    }
+    const perception = view.perceptions;
     const joints = new Map<string, JointFeedback>();
     for (const measured of perception) {
       if (measured.channel !== 'joint' || !measured.ownConnectionId) continue;
@@ -157,7 +176,7 @@ async function main(): Promise<void> {
       structureStatus.textContent = `${latest.connectionId}: ${latest.kind} · load ${latest.impulseNs.toFixed(2)} N·s`;
     }
   });
-  consoleLogSink.write({ level: 'info', source: 'active-body', message: 'Phase 4 sensor scene ready' });
+  consoleLogSink.write({ level: 'info', source: 'active-body', message: 'Phase 5 minimal brain scene ready' });
 
   let previousTime: number | undefined;
   function frame(now: number): void {
@@ -183,8 +202,17 @@ async function main(): Promise<void> {
       body.readPartPose(rangeSensor.partId), rangeSensor.localPose, rangeSensor.forward,
       rangeSensor.range, activeSensors.includes(rangeSensor.id));
     sensorStatus.textContent = `Sensors ${activeSensors.length}/${entity.blueprint.sensors?.length ?? 0} · range ${rangeHits.length}${nearestRange === undefined ? '' : `, nearest ${nearestRange.toFixed(2)} m`} · contacts ${contacts.length}${strongestContact === undefined ? '' : `, peak ${strongestContact.toFixed(2)} N·s`} · observations ${sensorRuntime.readObservations().length}`;
+    if (brainSnapshot) {
+      const { selfModel, worldModel, drives, decision, skillIntent } = brainSnapshot;
+      brainStatus.textContent = `Brain ${autonomous ? 'auto' : 'manual'} · goal ${decision?.goal.kind ?? 'none'} · skill ${skillIntent.skill} · avoid ${drives.avoid.toFixed(2)} · explore ${drives.explore.toFixed(2)} · self ${selfModel.stability.level} · feedback gap ${selfModel.feedbackGapRecent ? 'recent' : 'none'} · surfaces ${worldModel.ranges.length} · joints ${selfModel.joints.length}`;
+      brainStatus.dataset.goal = decision?.goal.kind ?? '';
+      brainStatus.dataset.skill = skillIntent.skill;
+      brainStatus.dataset.avoid = String(drives.avoid);
+      brainStatus.dataset.surfaces = String(worldModel.ranges.length);
+      brainStatus.dataset.joints = String(selfModel.joints.length);
+    }
     renderer.render();
-    status.textContent = `Morphodyne Phase 4 · ${mode} · tick ${simulation.tick} · x ${root.x.toFixed(2)} · y ${root.y.toFixed(2)} · z ${root.z.toFixed(2)} · yaw ${yaw.toFixed(2)}`;
+    status.textContent = `Morphodyne Phase 5 · ${mode} · tick ${simulation.tick} · x ${root.x.toFixed(2)} · y ${root.y.toFixed(2)} · z ${root.z.toFixed(2)} · yaw ${yaw.toFixed(2)}`;
     status.dataset.tick = String(simulation.tick);
     status.dataset.coreX = String(root.x);
     status.dataset.coreY = String(root.y);

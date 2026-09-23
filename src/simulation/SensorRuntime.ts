@@ -1,10 +1,11 @@
-import { canUseObservation, reachablePartIds, type Observation, type Perception } from '../core/sensing';
+import { canUseObservation, reachablePartIds, type AgentPerceptionView, type Observation, type SensorChannel } from '../core/sensing';
+import type { SensorPerception } from '../core/sensing';
 import type { Blueprint, Pose, Quaternion, Sensor, Vector3 } from '../core/model';
 import type { StructuralDamageState } from '../core/damage';
 import type { PhysicsAdapter } from '../physics/PhysicsAdapter';
 import type { PhysicsBody } from '../physics/PhysicsBody';
 
-export type SensorChannel = 'contact' | 'orientation' | 'angular-velocity' | 'relative-pose' | 'joint' | 'range';
+export type { AgentPerceptionView, SensorChannel, SensorPerception } from '../core/sensing';
 
 /** Numeric values have only sensor-local meaning. No target identity or world pose is exposed. */
 export interface SensorObservation extends Observation {
@@ -12,18 +13,6 @@ export interface SensorObservation extends Observation {
   /** For proprioception this identifies only the body's own measured connection. */
   readonly ownConnectionId?: string;
   readonly ownPartId?: string;
-}
-
-export interface SensorPerception extends Perception {
-  readonly sensorId: string;
-  readonly channel: SensorChannel;
-  readonly ownConnectionId?: string;
-  readonly ownPartId?: string;
-}
-
-export interface AgentPerceptionView {
-  readonly tick: number;
-  readonly perceptions: readonly SensorPerception[];
 }
 
 interface PendingSample {

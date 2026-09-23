@@ -20,6 +20,22 @@ export interface Perception {
   readonly uncertainty: readonly number[];
 }
 
+export type SensorChannel = 'contact' | 'orientation' | 'angular-velocity' | 'relative-pose' | 'joint' | 'range';
+
+/** Numeric measurements owned by a sensor; own IDs refer only to sensed body structure. */
+export interface SensorPerception extends Perception {
+  readonly sensorId: string;
+  readonly channel: SensorChannel;
+  readonly ownConnectionId?: string;
+  readonly ownPartId?: string;
+}
+
+/** The sole input contract for agent cognition. No physical runtime or world references. */
+export interface AgentPerceptionView {
+  readonly tick: number;
+  readonly perceptions: readonly SensorPerception[];
+}
+
 /** Returns the Part IDs still connected to rootPartId through active Blueprint connections. */
 export function reachablePartIds(
   blueprint: Blueprint,
