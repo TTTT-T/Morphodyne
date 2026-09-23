@@ -8,8 +8,8 @@ Current scope is **Phase 0 only**. Do not begin Phase 1 work before explicit acc
 
 1. Prioritize correct universal interfaces and basic rules over feature breadth.
 2. Keep the project modular. Break work into small independently testable tasks.
-3. Keep Core Simulation as framework-independent TypeScript wherever practical. Core must not depend on `MonoBehaviour`, `GameObject`, `Transform`, or Three.js or Rapier runtime types.
-4. Three.js / Rapier must be accessed through a Physics Adapter boundary. Core world rules must not depend on Rapier implementation details.
+3. Keep Core Simulation as framework-independent TypeScript wherever practical. Core must not depend directly on Three.js or Rapier runtime types.
+4. Rapier must be accessed through the Physics Adapter boundary, and Three.js through the Render Adapter boundary. Core world rules must not depend on either implementation.
 5. Concrete animals, machines, or scenes must not bypass universal rules through object-specific logic.
 6. Do not introduce predefined capability properties such as `canWalk`, `attackPower`, `biteDamage`, or `moveSpeed`.
 7. Do not implement animals, AI, detailed Damage, rich editor tooling, or later-phase features merely to produce an early demo.
