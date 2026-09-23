@@ -33,4 +33,4 @@ This is a short-horizon rule loop, not learning or adaptation. Missing range ret
 
 No Architecture principle changed. The Roadmap's richer Memory, Prediction, and Planner work is deferred in favor of the requested minimal Phase 5 causal loop. Implementation affects `src/core/sensing.ts`, the new Core brain modules, `src/simulation/BrainRuntime.ts`, `src/simulation/SensorRuntime.ts`, `src/main.ts`, and focused tests in Core, Simulation, and Tools.
 
-Implementation commit: `d87efc8`. Pull request: to be added at review handoff.
+Implementation commit: `d87efc8`. Pull request: [#8 — Phase 5: Minimal Agent Brain](https://github.com/TTTT-T/Morphodyne/pull/8), targeting `main`.
