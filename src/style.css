@@ -22,5 +22,6 @@ canvas { display: block; }
 
 .controls { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; max-width: 420px; }
 .structure-status { margin-top: 4px; color: #b9d8e5; }
+.sensor-status { margin-top: 4px; color: #8fe1b6; }
 .controls button { cursor: pointer; padding: 5px 8px; color: #eee; background: #344454; border: 1px solid #607084; border-radius: 4px; }
 .controls button:hover { background: #49627a; }

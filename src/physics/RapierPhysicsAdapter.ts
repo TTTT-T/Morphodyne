@@ -341,16 +341,15 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     return { x: velocity.x, y: velocity.y, z: velocity.z };
   }
 
-  castSensorRay(origin: Vector3, direction: Vector3, range: number, excludeBody: PhysicsBody): RayHit | null {
+  castSensorRay(origin: Vector3, direction: Vector3, range: number, excludePartHandle: BodyHandle): RayHit | null {
     if (![origin.x, origin.y, origin.z, direction.x, direction.y, direction.z, range].every(Number.isFinite)
       || range <= 0 || Math.abs(Math.hypot(direction.x, direction.y, direction.z) - 1) > 1e-5) {
       throw new Error('Invalid sensor ray');
     }
-    const runtimeBody = this.runtimeBodies.get(excludeBody);
-    if (!runtimeBody) throw new Error('Unknown physics body');
-    const own = new Set([...runtimeBody.partColliders.values()].map((collider) => collider.handle));
+    const excluded = this.bodies.get(excludePartHandle);
+    if (!excluded || !this.partRuntimeReferences.has(excludePartHandle)) throw new Error('Unknown mounting Part handle');
     const hit = this.world.castRay(new RAPIER.Ray(origin, direction), range, true,
-      undefined, undefined, undefined, undefined, (collider) => !own.has(collider.handle));
+      undefined, undefined, undefined, excluded);
     if (!hit) return null;
     return {
       distance: hit.timeOfImpact,

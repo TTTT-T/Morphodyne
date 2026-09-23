@@ -35,11 +35,13 @@ describe('physical sensor queries', () => {
     } };
     const body = physics.createBody(entity);
     physics.createBox({ halfExtents: { x: 0.3, y: 0.3, z: 0.3 }, position: { x: 0, y: 2, z: -2 }, dynamic: false });
+    physics.createBox({ halfExtents: { x: 0.3, y: 0.3, z: 0.3 }, position: { x: 0, y: 2, z: -4 }, dynamic: false });
     physics.step(1 / 60);
     const origin = { x: 0, y: 2, z: 0 };
     const direction = { x: 0, y: 0, z: -1 };
-    expect(physics.castSensorRay(origin, direction, 1, body)).toBeNull();
-    expect(physics.castSensorRay(origin, direction, 3, body)?.distance).toBeCloseTo(1.7, 2);
-    expect(physics.castSensorRay(origin, { x: 1, y: 0, z: 0 }, 3, body)).toBeNull();
+    const mount = body.partHandles.get('part')!;
+    expect(physics.castSensorRay(origin, direction, 1, mount)).toBeNull();
+    expect(physics.castSensorRay(origin, direction, 3, mount)?.distance).toBeCloseTo(1.7, 2);
+    expect(physics.castSensorRay(origin, { x: 1, y: 0, z: 0 }, 3, mount)).toBeNull();
   });
 });

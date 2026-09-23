@@ -35,8 +35,8 @@ export interface PhysicsAdapter {
   /** Actual narrow-phase contacts from the last completed step, excluding applied free impulses. */
   readPartContacts(body: PhysicsBody, partId: string): readonly PhysicalContact[];
   readPartAngularVelocity(body: PhysicsBody, partId: string): Vector3;
-  /** First physical surface along a ray, excluding colliders of the sensing body. */
-  castSensorRay(origin: Vector3, direction: Vector3, range: number, excludeBody: PhysicsBody): RayHit | null;
+  /** First physical surface along a ray, excluding only the mounting Part collider. */
+  castSensorRay(origin: Vector3, direction: Vector3, range: number, excludePartHandle: BodyHandle): RayHit | null;
   /**
    * Remove one runtime structural connection from the physics world. The
    * connected rigid bodies remain alive as independent bodies after removal.

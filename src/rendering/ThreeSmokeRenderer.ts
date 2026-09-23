@@ -8,6 +8,7 @@ export class ThreeSmokeRenderer {
   private readonly camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 200);
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true });
   private readonly meshes = new Map<number, THREE.Mesh>();
+  private readonly debugRays = new Map<string, THREE.Line>();
 
   constructor(container: HTMLElement) {
     this.scene.background = new THREE.Color(0x15191f);
@@ -62,6 +63,36 @@ export class ThreeSmokeRenderer {
     if (!mesh) throw new Error(`No mesh for body handle: ${handle}`);
     mesh.position.set(pose.position.x, pose.position.y, pose.position.z);
     mesh.quaternion.set(pose.rotation.x, pose.rotation.y, pose.rotation.z, pose.rotation.w);
+  }
+
+  /** Display a sensor sample supplied by the simulation. Rendering never performs a query. */
+  setDebugRay(id: string, origin: Vector3, end: Vector3, active: boolean): void {
+    const previous = this.debugRays.get(id);
+    if (previous) {
+      const positions = previous.geometry.getAttribute('position') as THREE.BufferAttribute;
+      positions.setXYZ(0, origin.x, origin.y, origin.z);
+      positions.setXYZ(1, end.x, end.y, end.z);
+      positions.needsUpdate = true;
+      (previous.material as THREE.LineBasicMaterial).color.setHex(active ? 0x63d7ac : 0x6b727c);
+      return;
+    }
+    const geometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(origin.x, origin.y, origin.z),
+      new THREE.Vector3(end.x, end.y, end.z),
+    ]);
+    const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: active ? 0x63d7ac : 0x6b727c }));
+    this.debugRays.set(id, line);
+    this.scene.add(line);
+  }
+
+  setMountedSensorRay(id: string, partPose: Pose, localPose: Pose, forward: Vector3, range: number, active: boolean): void {
+    const partRotation = new THREE.Quaternion(partPose.rotation.x, partPose.rotation.y, partPose.rotation.z, partPose.rotation.w);
+    const localRotation = new THREE.Quaternion(localPose.rotation.x, localPose.rotation.y, localPose.rotation.z, localPose.rotation.w);
+    const origin = new THREE.Vector3(partPose.position.x, partPose.position.y, partPose.position.z)
+      .add(new THREE.Vector3(localPose.position.x, localPose.position.y, localPose.position.z).applyQuaternion(partRotation));
+    const end = origin.clone().add(new THREE.Vector3(forward.x, forward.y, forward.z)
+      .normalize().applyQuaternion(localRotation).applyQuaternion(partRotation).multiplyScalar(range));
+    this.setDebugRay(id, origin, end, active);
   }
 
   render(): void {
