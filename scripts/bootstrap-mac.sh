@@ -28,7 +28,8 @@ echo
 echo "Installing project-local dependencies..."
 npm install
 echo
-echo "Running typecheck and build..."
+echo "Running tests, typecheck, and build..."
+npm run test
 npm run typecheck
 npm run build
 echo
