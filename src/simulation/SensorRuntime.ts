@@ -21,6 +21,11 @@ interface PendingSample {
   readonly observations: readonly SensorObservation[];
 }
 
+interface PreviousRootPose {
+  readonly tick: number;
+  readonly pose: Pose;
+}
+
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const add = (a: Vector3, b: Vector3): Vector3 => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z });
 const subtract = (a: Vector3, b: Vector3): Vector3 => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
@@ -47,6 +52,10 @@ function compose(part: Pose, local: Pose): Pose {
   return { position: add(part.position, rotate(local.position, part.rotation)), rotation: multiply(part.rotation, local.rotation) };
 }
 
+function copyPose(pose: Pose): Pose {
+  return { position: { ...pose.position }, rotation: { ...pose.rotation } };
+}
+
 function yaw(v: Vector3, radians: number): Vector3 {
   const c = Math.cos(radians); const s = Math.sin(radians);
   return { x: c * v.x + s * v.z, y: v.y, z: -s * v.x + c * v.z };
@@ -69,6 +78,7 @@ function seededRandom(seed: number): () => number {
 export class SensorRuntime {
   private readonly latest = new Map<string, readonly SensorObservation[]>();
   private readonly pending: PendingSample[] = [];
+  private readonly previousRootPoses = new Map<string, PreviousRootPose>();
   private activeSensorIds: readonly string[] = [];
   private view: AgentPerceptionView = { tick: -1, perceptions: [] };
 
@@ -90,6 +100,7 @@ export class SensorRuntime {
       reachable.has(sensor.partId) && state.parts[sensor.partId]?.damage.state !== 'fractured').map((sensor) => sensor.id));
     this.activeSensorIds = [...active];
     for (const id of this.latest.keys()) if (!active.has(id)) this.latest.delete(id);
+    for (const id of this.previousRootPoses.keys()) if (!active.has(id)) this.previousRootPoses.delete(id);
     for (let i = this.pending.length - 1; i >= 0; i -= 1) {
       if (!active.has(this.pending[i].sensorId)) this.pending.splice(i, 1);
     }
@@ -161,6 +172,18 @@ export class SensorRuntime {
       const result = [emit('orientation', [rotation.x, rotation.y, rotation.z, rotation.w]),
         emit('angular-velocity', [angular.x, angular.y, angular.z])];
       const root = this.body.readPartPose(this.rootPartId);
+      const previousRoot = this.previousRootPoses.get(sensor.id);
+      const elapsedTicks = previousRoot ? tick - previousRoot.tick : 0;
+      const elapsedSeconds = elapsedTicks * secondsPerTick;
+      if (previousRoot && elapsedTicks > 0 && Number.isFinite(elapsedSeconds) && elapsedSeconds > 0) {
+        const displacement = rotate(subtract(root.position, previousRoot.pose.position), conjugate(root.rotation));
+        result.push(emit('local-velocity', [
+          displacement.x / elapsedSeconds,
+          displacement.y / elapsedSeconds,
+          displacement.z / elapsedSeconds,
+        ]));
+      }
+      if (!previousRoot || tick > previousRoot.tick) this.previousRootPoses.set(sensor.id, { tick, pose: copyPose(root) });
       const rootInverse = conjugate(root.rotation);
       for (const partId of reachable) {
         const part = this.body.readPartPose(partId);

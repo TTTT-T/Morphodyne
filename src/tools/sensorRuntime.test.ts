@@ -1,12 +1,46 @@
 import { describe, expect, it } from 'vitest';
 import { createDamageState } from '../core/damage';
 import type { Entity } from '../core/model';
+import type { PhysicsAdapter } from '../physics/PhysicsAdapter';
+import type { PhysicsBody } from '../physics/PhysicsBody';
 import { RapierPhysicsAdapter } from '../physics/RapierPhysicsAdapter';
 import { createActiveBlueprint } from './activeBody';
 import { SensorRuntime } from '../simulation/SensorRuntime';
 import { StructuralDamageRuntime } from '../simulation/StructuralDamageRuntime';
 
 describe('SensorRuntime boundary', () => {
+  it('derives local velocity from consecutive proprioceptive poses using elapsed fixed steps', () => {
+    const blueprint = {
+      id: 'velocity-body',
+      materials: [{ id: 'mat', density: 500, friction: 0.5, restitution: 0 }],
+      parts: [{ id: 'root', materialId: 'mat', geometry: { kind: 'box' as const, halfExtents: { x: 0.2, y: 0.2, z: 0.2 } },
+        pose: { position: { x: 0, y: 1, z: 0 }, rotation: { x: 0, y: 0, z: 0, w: 1 } } }],
+      connections: [],
+      sensors: [{ id: 'core-proprio', kind: 'proprioception' as const, partId: 'root',
+        localPose: { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0, w: 1 } },
+        forward: { x: 0, y: 0, z: 1 }, updatePeriodTicks: 2, latencyTicks: 0,
+        noise: { standardDeviation: 0 }, resolution: 100 }],
+    };
+    let rootPosition = { x: 0, y: 1, z: 0 };
+    const body: PhysicsBody = {
+      entityId: 'velocity-body', partHandles: new Map(), connectionHandles: new Map(),
+      readPartPose: () => ({ position: { ...rootPosition }, rotation: { x: 0, y: 0, z: 0, w: 1 } }),
+    };
+    const physics = { readPartAngularVelocity: () => ({ x: 0, y: 0, z: 0 }) } as unknown as PhysicsAdapter;
+    const sensors = new SensorRuntime(blueprint, 'root', physics, body, () => createDamageState(blueprint));
+
+    sensors.afterPhysicsStep(0, 1 / 60);
+    expect(sensors.readAgentView().perceptions.some((entry) => entry.channel === 'local-velocity')).toBe(false);
+
+    rootPosition = { x: 0.2, y: 1, z: 0 };
+    sensors.afterPhysicsStep(1, 1 / 60);
+    expect(sensors.readAgentView().perceptions.some((entry) => entry.channel === 'local-velocity')).toBe(false);
+    sensors.afterPhysicsStep(2, 1 / 60);
+    const velocity = sensors.readAgentView().perceptions.find((entry) => entry.channel === 'local-velocity');
+    expect(velocity?.values).toEqual([6, 0, 0]);
+    expect(JSON.stringify(sensors.readAgentView())).not.toMatch(/position|worldPose|physics/);
+  });
+
   it('emits contact measurements only after a real collision', async () => {
     const physics = await RapierPhysicsAdapter.create();
     physics.createBox({ halfExtents: { x: 3, y: 0.1, z: 3 }, position: { x: 0, y: -0.1, z: 0 }, dynamic: false });

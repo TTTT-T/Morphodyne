@@ -39,4 +39,18 @@ describe('perception-only brain models', () => {
     expect(lost.feedbackGapRecent).toBe(true);
     expect(updateSelfModel(lost, view(33, [])).feedbackGapRecent).toBe(false);
   });
+
+  it('keeps current local velocity and excludes stale velocity evidence', () => {
+    const current = updateSelfModel(createSelfModel(), view(2, [
+      perception('local-velocity', [0.8, -0.1, 0.2], { tick: 2, expiresAtTick: 3 }),
+    ]));
+    expect(current.localVelocity).toMatchObject({ value: [0.8, -0.1, 0.2], observedTick: 2 });
+    expect(current.proprioceptionAvailable).toBe(true);
+
+    const stale = updateSelfModel(current, view(4, [
+      perception('local-velocity', [0.8, -0.1, 0.2], { tick: 2, expiresAtTick: 3 }),
+    ]));
+    expect(stale.localVelocity).toBeNull();
+    expect(stale.proprioceptionAvailable).toBe(false);
+  });
 });

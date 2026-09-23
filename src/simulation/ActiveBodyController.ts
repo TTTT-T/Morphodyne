@@ -5,6 +5,10 @@ import { createControlSignal, type ControlSignal, type MotorPrimitive } from '..
 export interface ControlIntent {
   readonly forward: number;
   readonly turn: number;
+  /** Scales the motor primitive output without prescribing a physical result. */
+  readonly amplitude?: number;
+  /** Shifts the caller's gait phase in radians. */
+  readonly phaseOffset?: number;
 }
 
 /**
@@ -237,6 +241,8 @@ export class ActiveBodyController implements MotorPrimitive<ActiveBodyController
     if (input.seconds < 0) throw new Error('Motor primitive step must be nonnegative');
     const forward = clampIntent(input.intent.forward, 'forward');
     const turn = clampIntent(input.intent.turn, 'turn');
+    const amplitude = clampAmplitude(input.intent.amplitude);
+    const phaseOffset = finitePhaseOffset(input.intent.phaseOffset);
     const up = rotateUp(input.rootPose.rotation);
     const orientationDamping = input.feedback?.bodyAngularVelocity;
     const radius = Math.hypot(...input.channels.map(({ x, z }) => Math.hypot(x, z))) / Math.sqrt(input.channels.length) || 1;
@@ -254,11 +260,11 @@ export class ActiveBodyController implements MotorPrimitive<ActiveBodyController
       const tiltRate = orientationDamping
         ? -(orientationDamping.x * radialX + orientationDamping.z * radialZ)
         : 0;
-      const phase = input.phaseRadians + channel.phase;
+      const phase = input.phaseRadians + channel.phase + phaseOffset;
       const cycle = Math.sin(phase);
       const crossCycle = Math.cos(phase);
       const channelGain = channel.motionGain ?? 1;
-      const localDrive = forward + turn * this.options.turnGain * radialX;
+      const localDrive = amplitude * (forward + turn * this.options.turnGain * radialX);
       const forwardTarget = -localDrive * this.options.motionGain * channelGain
         * (0.65 * cycle + 0.35 * radialZ * crossCycle);
       const targetAngle = (channel.neutralAngle ?? 0) + forwardTarget;
@@ -277,4 +283,16 @@ export class ActiveBodyController implements MotorPrimitive<ActiveBodyController
 function clampIntent(value: number, label: string): number {
   requireFinite(value, `Intent ${label}`);
   return clamp(value);
+}
+
+function clampAmplitude(value: number | undefined): number {
+  const amplitude = value ?? 1;
+  requireFinite(amplitude, 'Intent amplitude');
+  return Math.max(0, Math.min(1, amplitude));
+}
+
+function finitePhaseOffset(value: number | undefined): number {
+  const phaseOffset = value ?? 0;
+  requireFinite(phaseOffset, 'Intent phase offset');
+  return phaseOffset;
 }

@@ -20,7 +20,7 @@ export interface Perception {
   readonly uncertainty: readonly number[];
 }
 
-export type SensorChannel = 'contact' | 'orientation' | 'angular-velocity' | 'relative-pose' | 'joint' | 'range';
+export type SensorChannel = 'contact' | 'orientation' | 'angular-velocity' | 'local-velocity' | 'relative-pose' | 'joint' | 'range';
 
 /** Numeric measurements owned by a sensor; own IDs refer only to sensed body structure. */
 export interface SensorPerception extends Perception {

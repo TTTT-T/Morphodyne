@@ -4,7 +4,8 @@ import type { Entity, Pose } from './core/model';
 import { RapierPhysicsAdapter } from './physics/RapierPhysicsAdapter';
 import { ThreeSmokeRenderer } from './rendering/ThreeSmokeRenderer';
 import { ActiveBodyController, type ControlIntent, type JointFeedback } from './simulation/ActiveBodyController';
-import { BrainRuntime, skillIntentToControlIntent, type BrainSnapshot } from './simulation/BrainRuntime';
+import { BrainRuntime, type BrainSnapshot } from './simulation/BrainRuntime';
+import { SkillRuntime, type SkillRuntimeSnapshot } from './simulation/SkillRuntime';
 import { FixedStepSimulation } from './simulation/FixedStepSimulation';
 import { JointActuatorRuntime } from './simulation/JointActuatorRuntime';
 import { SensorRuntime } from './simulation/SensorRuntime';
@@ -31,6 +32,9 @@ async function main(): Promise<void> {
   const brainStatus = document.createElement('div');
   brainStatus.className = 'brain-status';
   panel.append(brainStatus);
+  const skillStatus = document.createElement('div');
+  skillStatus.className = 'skill-status';
+  panel.append(skillStatus);
   const controls = document.createElement('div');
   controls.className = 'controls';
   panel.append(controls);
@@ -80,7 +84,9 @@ async function main(): Promise<void> {
   const damageRuntime = new StructuralDamageRuntime(entity.blueprint, physics, body);
   const sensorRuntime = new SensorRuntime(entity.blueprint, 'part-core', physics, body, () => damageRuntime.state);
   const brain = new BrainRuntime();
+  const skill = new SkillRuntime();
   let brainSnapshot: BrainSnapshot | null = null;
+  let skillSnapshot: SkillRuntimeSnapshot | null = null;
   let autonomous = true;
   let intent: ControlIntent = { forward: 0, turn: 0 };
   let mode = 'Auto · Stand';
@@ -89,7 +95,7 @@ async function main(): Promise<void> {
   function addButton(label: string, next: ControlIntent): void {
     const button = document.createElement('button');
     button.textContent = label;
-    button.addEventListener('click', () => { autonomous = false; intent = next; mode = label; });
+    button.addEventListener('click', () => { autonomous = false; skill.cancelAttempt(); intent = next; mode = label; });
     controls.append(button);
   }
   addButton('Stand', { forward: 0, turn: 0 });
@@ -136,7 +142,8 @@ async function main(): Promise<void> {
     if (view.tick >= 0) {
       brainSnapshot = brain.update(view);
       if (autonomous) {
-        intent = skillIntentToControlIntent(brainSnapshot.skillIntent);
+        skillSnapshot = skill.update(brainSnapshot);
+        intent = skillSnapshot.control;
         mode = `Auto · ${brainSnapshot.skillIntent.skill}`;
       }
     }
@@ -160,7 +167,7 @@ async function main(): Promise<void> {
     });
     const driveSignals = getActiveBodyAssemblies().map((assembly) => {
       const x = parts.get(assembly.partIds[0])!.pose.position.x;
-      return createControlSignal(`actuator-${assembly.connectionIds[2]}`, Math.max(-1, Math.min(1, 0.03 * intent.forward + intent.turn * Math.sign(x))));
+      return createControlSignal(`actuator-${assembly.connectionIds[2]}`, Math.max(-1, Math.min(1, 0.03 * intent.forward * (intent.amplitude ?? 1) + intent.turn * Math.sign(x))));
     });
     actuatorRuntime.step([...signals, ...driveSignals, createControlSignal('actuator-connection-4', intent.turn)], seconds);
   }, (_seconds, tick) => {
@@ -176,7 +183,7 @@ async function main(): Promise<void> {
       structureStatus.textContent = `${latest.connectionId}: ${latest.kind} · load ${latest.impulseNs.toFixed(2)} N·s`;
     }
   });
-  consoleLogSink.write({ level: 'info', source: 'active-body', message: 'Phase 5 minimal brain scene ready' });
+  consoleLogSink.write({ level: 'info', source: 'active-body', message: 'Phase 6 skill adaptation scene ready' });
 
   let previousTime: number | undefined;
   function frame(now: number): void {
@@ -211,8 +218,21 @@ async function main(): Promise<void> {
       brainStatus.dataset.surfaces = String(worldModel.ranges.length);
       brainStatus.dataset.joints = String(selfModel.joints.length);
     }
+    if (skillSnapshot) {
+      const experience = skillSnapshot.lastExperience;
+      const prediction = skillSnapshot.prediction;
+      const parameters = skillSnapshot.parameters;
+      skillStatus.textContent = `Forward motor amplitude ${parameters.amplitude.toFixed(2)} · phase ${parameters.phaseOffset.toFixed(2)} rad · predicted ${prediction?.forwardProgress.toFixed(3) ?? '—'} m · observed ${experience?.observation.forwardProgress.toFixed(3) ?? '—'} m · error ${experience?.error.forwardProgress.toFixed(3) ?? '—'} m · adaptations ${skillSnapshot.adaptationCount} · last adjustment ${skillSnapshot.lastAdjustment?.reason ?? 'none'}`;
+      skillStatus.dataset.amplitude = String(parameters.amplitude);
+      skillStatus.dataset.phaseOffset = String(parameters.phaseOffset);
+      skillStatus.dataset.prediction = prediction ? String(prediction.forwardProgress) : '';
+      skillStatus.dataset.observed = experience ? String(experience.observation.forwardProgress) : '';
+      skillStatus.dataset.error = experience ? String(experience.error.forwardProgress) : '';
+      skillStatus.dataset.adaptations = String(skillSnapshot.adaptationCount);
+      skillStatus.dataset.experiences = String(skillSnapshot.experienceCount);
+    }
     renderer.render();
-    status.textContent = `Morphodyne Phase 5 · ${mode} · tick ${simulation.tick} · x ${root.x.toFixed(2)} · y ${root.y.toFixed(2)} · z ${root.z.toFixed(2)} · yaw ${yaw.toFixed(2)}`;
+    status.textContent = `Morphodyne Phase 6 · ${mode} · tick ${simulation.tick} · x ${root.x.toFixed(2)} · y ${root.y.toFixed(2)} · z ${root.z.toFixed(2)} · yaw ${yaw.toFixed(2)}`;
     status.dataset.tick = String(simulation.tick);
     status.dataset.coreX = String(root.x);
     status.dataset.coreY = String(root.y);
