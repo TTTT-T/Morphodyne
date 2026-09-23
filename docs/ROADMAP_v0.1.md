@@ -4,17 +4,16 @@
 
 Each phase follows:
 
-**Implement → automated tests → required Unity/Windows validation → phase report → acceptance → next phase.**
+**Implement → automated tests → required browser/physics validation → phase report → acceptance → next phase.**
 
 Do not skip ahead and bulk-implement later phases.
 
 Development environment:
 
-- **Mac mini**: Codex, Git, primary code development, pure-C# tests, documentation.
-- **Windows PC**: Unity 6.3 LTS, PhysX integration, simulation runs, performance testing.
-- Each machine keeps a local repository clone.
-- Git synchronizes source.
-- Do not run the Unity project directly from an SMB network share.
+- **Mac mini**: Codex, Git, primary development, tests, browser validation, and documentation.
+- **Windows PC**: optional later cross-platform and performance validation.
+- Git is the source of truth.
+- Phase 0 must be fully executable on the Mac without Unity.
 
 ---
 
@@ -26,16 +25,17 @@ Create a minimal engineering foundation that does not constrain later architectu
 
 ### Implement
 
-- Unity project foundation.
-- Modular directories/assemblies for Core, PhysicsAdapter, Simulation, and Tools.
-- Pure C# Core assembly.
+- Vite + TypeScript project foundation.
+- Three.js rendering boundary.
+- Rapier 3D physics boundary.
+- Modular directories for Core, PhysicsAdapter, Rendering, Simulation, and Tools.
+- Framework-independent TypeScript Core.
 - Unit-test infrastructure.
-- Empty/minimal Unity Physics Adapter boundary.
-- Standard Unity `.gitignore`.
+- Minimal Rapier Physics Adapter boundary.
+- Standard Node/Vite `.gitignore`.
 - Basic logging conventions.
-- Mac build/test workflow.
-- Windows Unity pull/open/run workflow.
-- Mac → Windows LAN/SSH integration plan where practical.
+- Mac build/typecheck/test/dev workflow.
+- A minimal browser smoke scene proving Three.js ↔ Rapier synchronization.
 
 Initial Core types should be minimal:
 
@@ -58,9 +58,10 @@ Initial Core types should be minimal:
 
 ### Acceptance
 
-- Core has no UnityEngine dependency.
+- Core has no Three.js or Rapier runtime dependency.
 - Core unit tests execute on Mac.
-- Windows can open and run the same Unity project revision.
+- `npm run build` and `npm run typecheck` succeed on Mac.
+- The browser smoke scene runs locally.
 - Module dependency direction is documented and enforced where practical.
 
 ---
@@ -74,10 +75,10 @@ Prove that Blueprint structure maps cleanly to a physical body.
 ### Implement
 
 - PhysicsBody abstraction.
-- Rigidbody adapter.
+- Rapier rigid-body adapter.
 - Primitive / Convex physics geometry.
-- Part → Rigidbody mapping.
-- Connection → Fixed/Hinge/ConfigurableJoint mapping.
+- Part → Rapier rigid-body/collider mapping.
+- Connection → Rapier fixed/revolute/prismatic joint mapping.
 - Blueprint → runtime Entity construction.
 - Simple generic quadruped-shaped passive test body.
 
