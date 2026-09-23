@@ -29,3 +29,5 @@ The existing large JavaScript chunk warning remains nonblocking. Windows was not
 The demonstrated forward and turn motions are crude. A sustained Forward input can tip the body after the short acceptance window; this is not a stable gait or recovery policy. The energy contract represents available power only, without stored fuel, heat or fatigue. The impact experiment proves physical response, not guaranteed recovery from every collision. These limits do not alter the Architecture or Roadmap principles and are not hidden by outcome-setting logic.
 
 Implementation is in `src/core`, `src/physics`, `src/simulation`, `src/tools`, `src/main.ts` and `src/style.css`. Review the branch and PR against `main`; Phase 3 has not begun.
+
+Implementation commits: `cbef378` (Core), `be8ac5f` (Rapier), `2ef7688` (active body); report commit: `4bd6949`. Pull request: [#5 — Phase 2: actuator-driven active body](https://github.com/TTTT-T/Morphodyne/pull/5), targeting `main`.
