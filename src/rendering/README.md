@@ -2,4 +2,4 @@
 
 Three.js-specific visualization belongs here.
 
-Rendering observes Morphodyne/Rapier state but must not manufacture simulation outcomes.
+Rendering receives poses and must not manufacture simulation outcomes. `ThreeSmokeRenderer` owns only meshes, camera, lighting, and presentation.
