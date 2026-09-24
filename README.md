@@ -32,11 +32,12 @@ See:
 
 - [`docs/ARCHITECTURE_v0.1.md`](docs/ARCHITECTURE_v0.1.md)
 - [`docs/ROADMAP_v0.1.md`](docs/ROADMAP_v0.1.md)
+- [`NEXT_TASK.md`](NEXT_TASK.md) — current Codex handoff
 - [`docs/PHASE0_KICKOFF.md`](docs/PHASE0_KICKOFF.md)
 
 ## Status
 
-**Pre-alpha / Phase 7 World & Environment complete. Phase 8A Construction Runtime next.**
+**Pre-alpha / Phase 7 complete. Phase 8 Construction + God Sandbox + Core Validation next.**
 
 The project currently prioritizes universal world/structure rules, causal correctness, modularity, and testability over visual fidelity or content volume. The active quadruped is a validation Blueprint, not the architectural center of the project.
 
