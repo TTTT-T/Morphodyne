@@ -5,6 +5,7 @@ import {
   type ControlSignal,
   type MotorPrimitive,
   validateControlSignal,
+  validateEnergySourceSpec,
 } from './actuation';
 import { validateBlueprint } from './model';
 
@@ -35,6 +36,20 @@ function actuatorBlueprint(): Blueprint {
 }
 
 describe('Core actuation contract', () => {
+  it('validates finite joules, watts, and conversion efficiency independently', () => {
+    expect(validateEnergySourceSpec({ capacityJ: 20, initialEnergyJ: 5, maxPowerWatts: 10, efficiency: 0.5 }))
+      .toEqual([]);
+    expect(validateEnergySourceSpec({ capacityJ: -1, initialEnergyJ: 2, maxPowerWatts: -2, efficiency: 0 }))
+      .toEqual([
+        'Energy capacity must be finite and nonnegative',
+        'Initial energy must be finite and within capacity',
+        'Maximum power must be finite and nonnegative',
+        'Energy efficiency must be finite and in (0, 1]',
+      ]);
+    expect(validateEnergySourceSpec({ capacityJ: Number.POSITIVE_INFINITY, maxPowerWatts: 10, efficiency: 1 }))
+      .toContain('Energy capacity must be finite and nonnegative');
+  });
+
   it('keeps actuators optional so passive Phase 1 blueprints remain valid', () => {
     const passive: Blueprint = { ...actuatorBlueprint(), actuators: undefined };
     expect(validateBlueprint(passive)).toEqual([]);

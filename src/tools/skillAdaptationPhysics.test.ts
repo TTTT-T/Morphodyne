@@ -3,6 +3,7 @@ import { createControlSignal } from '../core/actuation';
 import { RapierPhysicsAdapter } from '../physics/RapierPhysicsAdapter';
 import { ActiveBodyController, type JointFeedback } from '../simulation/ActiveBodyController';
 import { BrainRuntime } from '../simulation/BrainRuntime';
+import { EnergyRuntime } from '../simulation/EnergyRuntime';
 import { JointActuatorRuntime } from '../simulation/JointActuatorRuntime';
 import { SensorRuntime } from '../simulation/SensorRuntime';
 import { SkillRuntime } from '../simulation/SkillRuntime';
@@ -26,7 +27,7 @@ async function createTrial() {
   });
   const controller = ActiveBodyController.fromGroups(groups,
     { standingGain: 0.01, standingDampingGain: 0, jointPositionGain: 3, jointVelocityGain: 0.6, turnGain: 0 });
-  const actuators = new JointActuatorRuntime(blueprint, physics, body, { availablePowerWatts: 400 });
+  const actuators = new JointActuatorRuntime(blueprint, physics, body, new EnergyRuntime({ capacityJ: 100000, maxPowerWatts: 400, efficiency: 1 }));
   const damage = new StructuralDamageRuntime(blueprint, physics, body);
   const sensors = new SensorRuntime(blueprint, 'part-core', physics, body, () => damage.state, () => 0.5);
   const brain = new BrainRuntime();

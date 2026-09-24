@@ -29,11 +29,11 @@ describe('WorldRuntime', () => {
     world.spawn({ id: 'platform', blueprint: createSensorPlatformBlueprint() });
     world.spawn({ id: 'object', blueprint: createPassiveObjectBlueprint() }, { origin: { x: 2, y: 0.55, z: 0 } });
     world.spawn({ id: 'machine', blueprint: createActuatedMachineBlueprint() }, {
-      origin: { x: -3, y: 2, z: 0 }, energy: { availablePowerWatts: 100 },
+      origin: { x: -3, y: 2, z: 0 }, energy: { capacityJ: 100000, maxPowerWatts: 100, efficiency: 1 },
       control: () => [{ actuatorId: 'machine-hinge-actuator', value: 1 }],
     });
     world.spawn({ id: 'agent', blueprint: createActiveBlueprint() }, {
-      origin: { x: 0, y: 0, z: 5 }, energy: { availablePowerWatts: 400 },
+      origin: { x: 0, y: 0, z: 5 }, energy: { capacityJ: 100000, maxPowerWatts: 400, efficiency: 1 },
       agent: { control: () => [] },
     });
     const machine = world.getPhysicsBody('machine');

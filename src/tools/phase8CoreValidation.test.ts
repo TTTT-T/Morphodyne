@@ -6,6 +6,7 @@ import type { Blueprint } from '../core/model';
 import { RapierPhysicsAdapter } from '../physics/RapierPhysicsAdapter';
 import { ActiveBodyController, type JointFeedback } from '../simulation/ActiveBodyController';
 import { BrainRuntime } from '../simulation/BrainRuntime';
+import { EnergyRuntime } from '../simulation/EnergyRuntime';
 import { JointActuatorRuntime } from '../simulation/JointActuatorRuntime';
 import { SensorRuntime } from '../simulation/SensorRuntime';
 import { SkillRuntime } from '../simulation/SkillRuntime';
@@ -32,17 +33,17 @@ describe('Phase 8 core causal validation', () => {
     world.spawn(passive);
     world.spawn(machine, {
       origin: { x: -3, y: 1, z: 0 },
-      energy: { availablePowerWatts: 100 },
+      energy: { capacityJ: 100000, maxPowerWatts: 100, efficiency: 1 },
       control: () => [createControlSignal('machine-hinge-actuator', 1)],
     });
     world.spawn(heavyMachine, {
       origin: { x: -7, y: 1, z: 0 },
-      energy: { availablePowerWatts: 100 },
+      energy: { capacityJ: 100000, maxPowerWatts: 100, efficiency: 1 },
       control: () => [createControlSignal('machine-hinge-actuator', 1)],
     });
     world.spawn(agent, {
       origin: { x: 3, y: 0, z: 0 },
-      energy: { availablePowerWatts: 400 },
+      energy: { capacityJ: 100000, maxPowerWatts: 400, efficiency: 1 },
       agent: { control: () => [] },
     });
 
@@ -130,13 +131,13 @@ describe('Phase 8 core causal validation', () => {
     {
       name: 'machine', build: createActuatedMachineBlueprint, partId: 'machine-base',
       options: {
-        energy: { availablePowerWatts: 100 },
+        energy: { capacityJ: 100000, maxPowerWatts: 100, efficiency: 1 },
         control: () => [createControlSignal('machine-hinge-actuator', 0.3)],
       },
     },
     {
       name: 'agent', build: createActiveBlueprint, partId: 'part-core',
-      options: { energy: { availablePowerWatts: 400 }, agent: { control: () => [] } },
+      options: { energy: { capacityJ: 100000, maxPowerWatts: 400, efficiency: 1 }, agent: { control: () => [] } },
     },
   ];
 
@@ -249,7 +250,7 @@ describe('Phase 8 core causal validation', () => {
     });
     const controller = ActiveBodyController.fromGroups(groups,
       { standingGain: 0.01, standingDampingGain: 0, jointPositionGain: 3, jointVelocityGain: 0.6, turnGain: 0 });
-    const actuators = new JointActuatorRuntime(blueprint, physics, body, { availablePowerWatts: 400 });
+    const actuators = new JointActuatorRuntime(blueprint, physics, body, new EnergyRuntime({ capacityJ: 100000, maxPowerWatts: 400, efficiency: 1 }));
     const damage = new StructuralDamageRuntime(blueprint, physics, body);
     const sensors = new SensorRuntime(blueprint, 'part-core', physics, body, () => damage.state, () => 0.5);
     const brain = new BrainRuntime();

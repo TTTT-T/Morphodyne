@@ -42,10 +42,31 @@ export interface TensionActuator extends Actuator {
 
 export type StructuralActuator = JointActuator | TensionActuator;
 
-/** Minimal energy observation shared by different energy mechanisms. */
-export interface EnergySource {
-  /** Currently available power in watts. */
-  readonly availablePowerWatts: number;
+/** A finite store supplying mechanical work to an Entity's actuators. */
+export interface EnergySourceSpec {
+  /** Store capacity in joules. The store starts full unless initialEnergyJ is set. */
+  readonly capacityJ: number;
+  readonly initialEnergyJ?: number;
+  /** Maximum usable mechanical power in watts, shared by all actuators. */
+  readonly maxPowerWatts: number;
+  /** Fraction of stored energy converted to positive mechanical work. */
+  readonly efficiency: number;
+}
+
+export function validateEnergySourceSpec(spec: EnergySourceSpec): string[] {
+  const errors: string[] = [];
+  if (!Number.isFinite(spec.capacityJ) || spec.capacityJ < 0) errors.push('Energy capacity must be finite and nonnegative');
+  if (spec.initialEnergyJ !== undefined && (!Number.isFinite(spec.initialEnergyJ)
+    || spec.initialEnergyJ < 0 || spec.initialEnergyJ > spec.capacityJ)) {
+    errors.push('Initial energy must be finite and within capacity');
+  }
+  if (!Number.isFinite(spec.maxPowerWatts) || spec.maxPowerWatts < 0) {
+    errors.push('Maximum power must be finite and nonnegative');
+  }
+  if (!Number.isFinite(spec.efficiency) || spec.efficiency <= 0 || spec.efficiency > 1) {
+    errors.push('Energy efficiency must be finite and in (0, 1]');
+  }
+  return errors;
 }
 
 /**

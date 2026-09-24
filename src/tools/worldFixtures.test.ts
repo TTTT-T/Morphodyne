@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createDamageState } from '../core/damage';
 import { validateBlueprint } from '../core/model';
 import { RapierPhysicsAdapter } from '../physics/RapierPhysicsAdapter';
+import { EnergyRuntime } from '../simulation/EnergyRuntime';
 import { JointActuatorRuntime } from '../simulation/JointActuatorRuntime';
 import { SensorRuntime } from '../simulation/SensorRuntime';
 import {
@@ -40,7 +41,7 @@ describe('Phase 6.5 world fixtures', () => {
     const body = physics.createBody({ id: 'machine', blueprint }, { x: 0, y: 2, z: 0 });
     const actuator = blueprint.actuators![0];
     if (actuator.kind === 'tension') throw new Error('Expected a joint actuator fixture');
-    const runtime = new JointActuatorRuntime(blueprint, physics, body, { availablePowerWatts: 100 });
+    const runtime = new JointActuatorRuntime(blueprint, physics, body, new EnergyRuntime({ capacityJ: 100000, maxPowerWatts: 100, efficiency: 1 }));
     const before = physics.readJointPosition(body, actuator.connectionId);
 
     runtime.step([{ actuatorId: actuator.id, value: 1 }], 1 / 60);

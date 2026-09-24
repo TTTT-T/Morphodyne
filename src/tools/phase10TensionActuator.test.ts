@@ -14,7 +14,7 @@ interface TrialOptions {
   readonly signal?: number;
   readonly maxOutput?: number;
   readonly responseTimeSeconds?: number;
-  readonly availablePowerWatts?: number;
+  readonly maxPowerWatts?: number;
   readonly yieldTorqueNm?: number;
   readonly ultimateTorqueNm?: number;
   readonly ticks?: number;
@@ -48,7 +48,7 @@ async function trial(options: TrialOptions = {}) {
       part('arm', 0.65, { x: 0.5, y: 0.07, z: 0.1 }, 2)],
     connections: [connection], actuators: [actuator] };
   const world = new WorldRuntime(physics);
-  world.spawn({ id: 'machine', blueprint }, { energy: { availablePowerWatts: options.availablePowerWatts ?? 1000 },
+  world.spawn({ id: 'machine', blueprint }, { energy: { capacityJ: 100000, maxPowerWatts: options.maxPowerWatts ?? 1000, efficiency: 1 },
     control: () => [{ actuatorId: 'pull', value: options.signal ?? 1 }] });
   const body = world.getPhysicsBody('machine');
   let peakForceN = 0;
@@ -84,7 +84,7 @@ describe('Phase 10 tension through WorldRuntime', () => {
     const blueprint: Blueprint = { id: 'separate-pull', materials: [material], parts, connections: [],
       actuators: [{ id: 'pull', kind: 'tension', fromPartId: 'part-0', toPartId: 'part-1',
         fromAttachment: { x: 0, y: 0, z: 0 }, toAttachment: { x: 0, y: 0, z: 0 }, maxOutput: 20 }] };
-    world.spawn({ id: 'machine', blueprint }, { energy: { availablePowerWatts: 1000 },
+    world.spawn({ id: 'machine', blueprint }, { energy: { capacityJ: 100000, maxPowerWatts: 1000, efficiency: 1 },
       control: () => [{ actuatorId: 'pull', value: 1 }] });
     expect(world.listComponents()).toHaveLength(2);
     expect(world.inspectEntity('machine')?.actuatorIds).toEqual(['pull']);
@@ -133,7 +133,7 @@ describe('Phase 10 tension through WorldRuntime', () => {
     const zero = await trial({ signal: 0 });
     const negative = await trial({ signal: -1 });
     const positive = await trial({ signal: 1 });
-    const unpowered = await trial({ availablePowerWatts: 0 });
+    const unpowered = await trial({ maxPowerWatts: 0 });
     const coincident = await trial({ baseAttachmentX: 0.15, baseAttachmentY: 0,
       armAttachmentX: -0.5, ticks: 1 });
     const coincidentNoPull = await trial({ baseAttachmentX: 0.15, baseAttachmentY: 0,

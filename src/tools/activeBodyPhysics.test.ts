@@ -4,6 +4,7 @@ import type { Blueprint } from '../core/model';
 import { RapierPhysicsAdapter } from '../physics/RapierPhysicsAdapter';
 import { createActiveBlueprint, getActiveBodyAssemblies } from './activeBody';
 import { ActiveBodyController, type ControlIntent, type JointFeedback } from '../simulation/ActiveBodyController';
+import { EnergyRuntime } from '../simulation/EnergyRuntime';
 import { JointActuatorRuntime } from '../simulation/JointActuatorRuntime';
 
 interface TrialResult { readonly x: number; readonly y: number; readonly z: number; readonly yaw: number }
@@ -31,7 +32,7 @@ async function trial(intent: ControlIntent, options: { powered?: boolean; impact
     };
   });
   const controller = ActiveBodyController.fromGroups(groups, { standingGain: 0.01, standingDampingGain: 0, jointPositionGain: 3, jointVelocityGain: 0.6, turnGain: 0 });
-  const runtime = new JointActuatorRuntime(blueprint, physics, body, { availablePowerWatts: options.powered === false ? 0 : 400 });
+  const runtime = new JointActuatorRuntime(blueprint, physics, body, new EnergyRuntime({ capacityJ: 100000, maxPowerWatts: options.powered === false ? 0 : 400, efficiency: 1 }));
   let projectile: number | undefined;
   for (let tick = 0; tick < 300; tick += 1) {
     if (options.impact && tick === 180) {

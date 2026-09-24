@@ -1,4 +1,4 @@
-import type { ControlSignal, EnergySource } from '../core/actuation';
+import type { ControlSignal, EnergySourceSpec } from '../core/actuation';
 import { createDamageState, type DamageEvent, type StructuralDamageState } from '../core/damage';
 import type { EnvironmentSpec } from '../core/environment';
 import { validateBlueprint, type Blueprint, type Entity, type EntityId, type Pose, type Vector3 } from '../core/model';
@@ -8,6 +8,7 @@ import type { PhysicsBody } from '../physics/PhysicsBody';
 import { FixedStepSimulation } from './FixedStepSimulation';
 import { EnvironmentRuntime, type PartEnvironmentView, type PhysicalPartView } from './EnvironmentRuntime';
 import { ActuatorRuntime } from './ActuatorRuntime';
+import { EnergyRuntime, type EnergyState } from './EnergyRuntime';
 import { SensorRuntime, type SensorObservation } from './SensorRuntime';
 import { StructuralDamageRuntime } from './StructuralDamageRuntime';
 
@@ -16,7 +17,7 @@ export type WorldControlSource = (seconds: number, tick: number) => readonly Con
 export interface SpawnOptions {
   readonly origin?: Vector3;
   /** Energy and control may be supplied for a machine without an Agent. */
-  readonly energy?: EnergySource;
+  readonly energy?: EnergySourceSpec;
   readonly control?: WorldControlSource;
   /** Optional Agent composition uses the same signal path as external control. */
   readonly agent?: { readonly control: WorldControlSource };
@@ -55,7 +56,7 @@ interface EntityRecord {
   body: PhysicsBody;
   damage: StructuralDamageRuntime;
   readonly origin: Vector3;
-  readonly energy?: EnergySource;
+  readonly energy?: EnergyRuntime;
   actuator?: ActuatorRuntime;
   control?: WorldControlSource;
   agent?: { readonly control: WorldControlSource };
@@ -92,15 +93,16 @@ export class WorldRuntime {
     if ((options.control || options.agent) && (entity.blueprint.actuators?.length ?? 0) > 0 && !options.energy) {
       throw new Error(`Controlled actuators require an energy source: ${entity.id}`);
     }
+    const energy = options.energy ? new EnergyRuntime(options.energy) : undefined;
     const body = this.physics.createBody(entity, options.origin);
     const damage = new StructuralDamageRuntime(entity.blueprint, this.physics, body);
     const record: EntityRecord = {
       entity, body, damage, origin: options.origin ?? { x: 0, y: 0, z: 0 },
-      ...(options.energy ? { energy: options.energy } : {}),
+      ...(energy ? { energy } : {}),
       ...(options.control ? { control: options.control } : {}),
       ...(options.agent ? { agent: options.agent } : {}),
-      ...(options.energy && (entity.blueprint.actuators?.length ?? 0) > 0
-        ? { actuator: new ActuatorRuntime(entity.blueprint, this.physics, body, options.energy) } : {}),
+      ...(energy && (entity.blueprint.actuators?.length ?? 0) > 0
+        ? { actuator: new ActuatorRuntime(entity.blueprint, this.physics, body, energy) } : {}),
       components: new Map(), livePartIds: new Set(entity.blueprint.parts.map((part) => part.id)),
     };
     this.entities.set(entity.id, record);
@@ -254,6 +256,11 @@ export class WorldRuntime {
 
   getDamageRuntime(entityId: EntityId): StructuralDamageRuntime {
     return this.requireEntity(entityId).damage;
+  }
+
+  /** Debug/inspection state. Agent control does not receive this world truth. */
+  inspectEnergy(entityId: EntityId): EnergyState | undefined {
+    return this.requireEntity(entityId).energy?.state;
   }
 
   /** Debug truth only; Agent control receives observations through SensorRuntime. */

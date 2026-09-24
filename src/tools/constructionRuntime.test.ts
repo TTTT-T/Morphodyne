@@ -43,7 +43,7 @@ describe('ConstructionRuntime', () => {
     const construction = new ConstructionRuntime(world);
     const machine = createActuatedMachineBlueprint();
     construction.spawn({ id: 'machine', blueprint: machine }, {
-      energy: { availablePowerWatts: 100 }, control: () => [{ actuatorId: 'machine-hinge-actuator', value: 1 }],
+      energy: { capacityJ: 100000, maxPowerWatts: 100, efficiency: 1 }, control: () => [{ actuatorId: 'machine-hinge-actuator', value: 1 }],
     });
     const machineBody = world.getPhysicsBody('machine');
     world.stepOnce();
@@ -70,7 +70,7 @@ describe('ConstructionRuntime', () => {
     expect(() => construction.loadBlueprint('{"parts": []}')).toThrow(/materials, parts, and connections/);
 
     construction.spawn({ id: 'agent', blueprint: createActiveBlueprint() }, {
-      energy: { availablePowerWatts: 400 }, agent: { control: () => [] },
+      energy: { capacityJ: 100000, maxPowerWatts: 400, efficiency: 1 }, agent: { control: () => [] },
     });
     expect(construction.inspect('agent').entity.agentPresent).toBe(true);
     expect(construction.inspect('agent').components.length).toBeGreaterThan(0);
