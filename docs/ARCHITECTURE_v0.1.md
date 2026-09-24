@@ -152,6 +152,14 @@ Three.js owns presentation. Rapier executes physics. Morphodyne owns simulation 
 
 This separation is deliberate so a future renderer or physics backend can be replaced without rewriting the world model.
 
+### 3.2 World, Construction, and Physics ownership
+
+- **WorldRuntime** owns stable Entity IDs, spawn/remove, fixed-step scheduling, runtime composition, and the current ownership of connected structural components. A detached component receives its own world ID and separation provenance while retaining its source Entity and existing physical Parts.
+- **Construction Runtime** (Phase 8A) will own intentional structure edits: attach, detach, add/remove/modify Part or Connection, validation, and the corresponding reconstruction path. It will request lifecycle changes through WorldRuntime rather than treating UI or scene code as structural truth.
+- **PhysicsAdapter** creates, steps, and removes the physical representation of current structure. Rapier handles remain backend references, never Entity or component identity. Physical separation removes a joint; WorldRuntime then projects the resulting Core connection state into component ownership.
+
+This Phase 6.5 component model does not synthesize a new Blueprint or reset physical velocity when a connection fails. Reattachment will require an explicit Construction operation and a defined physics update path.
+
 ---
 
 ## 4. Core concepts
