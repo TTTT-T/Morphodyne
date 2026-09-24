@@ -6,7 +6,8 @@ Read before implementation, in this order:
 
 1. `docs/ARCHITECTURE_v0.1.md`
 2. `docs/ROADMAP_v0.1.md`
-3. The active Phase kickoff document
+3. `NEXT_TASK.md` when present for the active work
+4. The active Phase kickoff document when one exists
 
 Architecture takes precedence over implementation convenience.
 
@@ -38,6 +39,7 @@ Morphodyne exists to realize the project vision and validate the simulation idea
 ## Scope Discipline
 
 - Work primarily on the active Phase and its acceptance goal.
+- Phase 8 is intentionally one integrated delivery. Do not create separate user handoff points between Construction Runtime, God Sandbox UI, and Core Validation; treat them as internal milestones unless a real blocker requires user input.
 - After Phase 6, follow the Roadmap course correction: Phase 6.5 World/Generality work precedes new Environment or God Sandbox expansion.
 - Freeze new Brain, planner, Skill-learning, Jev/LLM, RL, social, and quadruped-locomotion features unless the active World/Environment/Construction work requires a narrow integration fix.
 - Do not implement later-phase features unless they are necessary to validate the active Phase or establish a required interface.
@@ -163,6 +165,8 @@ Before declaring a Phase complete:
 Do not add extra validation or reporting solely for ceremony. Phase completion evidence should be sufficient, concise, and decision-oriented.
 
 Do not begin the next Phase until the current Phase has been reviewed and accepted.
+
+For Phase 8 specifically, internal milestones are not separate Phases and do not require separate PRs or user review boundaries.
 
 ## Review Handoff
 
