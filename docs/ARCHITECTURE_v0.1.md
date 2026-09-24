@@ -2,7 +2,7 @@
 
 ## 1. Project definition
 
-Morphodyne is a physics-first god sandbox built around universal simulation rules, embodied autonomous agents, structural damage, perception, learning, and emergent behavior.
+Morphodyne is a physics-first god sandbox built around universal world rules, composable physical structures, optional embodied autonomous agents, structural damage, perception, learning, and emergent behavior.
 
 Core experience:
 
@@ -75,6 +75,33 @@ Biological and mechanical entities may share interfaces without being forced int
 
 Muscles and motors may both implement an actuator interface while retaining different energy, thermal, fatigue, and failure models.
 
+### 2.7 World first; Agent is optional
+
+Morphodyne is a world and construction simulation first. An Agent is an optional subsystem that some Entities may possess.
+
+A rock, beam, door, machine, detached structure, vehicle, sensor platform, or autonomous creature must all be valid first-class Entities without requiring a Brain, Drive, Goal, Skill, or Learning system.
+
+The current quadruped is a **validation Blueprint**, not the architectural center of Morphodyne. Core abstractions must not evolve around assumptions that all useful Entities are quadrupeds, animals, locomoting bodies, or autonomous agents.
+
+When a new core rule is added, prefer validating it across multiple structurally different cases, such as:
+
+- a passive physical object;
+- an actuated machine without an Agent;
+- a sensor-bearing structure without a Brain;
+- an autonomous Agent.
+
+If a proposed rule only makes sense because the current quadruped exists, review the abstraction before adding it to Core.
+
+### 2.8 Phase 6 course correction
+
+Phases 4–6 intentionally used the active quadruped to prove the Sensor → Perception → Brain → Skill → Adaptation chain. That proof is now sufficient for v0.1.
+
+Until World, Environment, and Construction reach comparable maturity, Brain and Skill-learning expansion is frozen except for fixes required by active integration work. Do not add richer planning, LLM/Jev control, reinforcement learning, social behavior, or quadruped-specific locomotion improvements during this correction period.
+
+The development center now returns to:
+
+**World → Structure → Construction → Environment → Interaction.**
+
 ---
 
 ## 3. Technical direction
@@ -104,11 +131,16 @@ Not part of the initial implementation:
 ```text
 God Sandbox UI / Debug Tools
             ↓
+World / Construction Runtime
+            ↓
 Morphodyne Simulation Core
             ↓
 Physics Adapter
             ↓
 Rapier 3D
+
+Optional Agent systems observe and act through Core interfaces:
+Sensor → Perception → Brain → Skill → Actuator
 
 Rendering observes the world through:
 Morphodyne World State → Render Adapter → Three.js
@@ -157,7 +189,9 @@ Entity
 - HistoryReference
 ```
 
-A rock, autonomous creature, machine, detached limb, or assembled structure may all be Entities.
+A rock, autonomous creature, machine, detached limb, loose component, or assembled structure may all be Entities.
+
+Entity lifecycle and structural membership must remain explicit. Structural separation in the physics backend is not by itself sufficient world semantics: the World/Construction layer must eventually support detached structures becoming independently inspectable, removable, attachable, and re-attachable without species-specific logic.
 
 ### 4.2 Part
 
@@ -346,6 +380,8 @@ Deep online neural training is not required for v0.1.
 ---
 
 ## 8. Minimal agent brain
+
+The Agent Brain is optional. Passive objects and non-autonomous machines do not require this layer.
 
 Initial autonomous loop:
 
@@ -557,9 +593,9 @@ Do not assume cross-platform bitwise determinism from the default Rapier build. 
 
 ---
 
-## 15. Blueprint and templates
+## 15. Blueprint, runtime construction, and templates
 
-Blueprint describes structure, not ability.
+Blueprint describes structure, not ability. Runtime construction must preserve the same rule: editing structure changes what the Entity physically is; it must not assign a game-style capability.
 
 Initial operations:
 
@@ -576,9 +612,10 @@ Template is only a prebuilt Blueprint.
 
 Initial useful templates:
 
+- Simple Object
+- Simple Articulated Machine
 - Generic Quadruped
 - Generic Machine Quadruped
-- Simple Object
 
 Species is not a core simulation type.
 
@@ -592,13 +629,16 @@ Natural-language creation should remain an interface extension and must not gran
 
 v0.1 must prioritize:
 
+- World and Entity lifecycle
 - Material / Part / Connection
+- runtime construction and recomposition
 - physics mapping
 - Actuator
 - Damage
+- Environment
 - Capability
 - Sensor
-- minimal Agent loop
+- minimal optional Agent loop
 - Skill
 - adaptation after body-state change
 
@@ -652,3 +692,5 @@ If a concrete requirement cannot be represented by the current universal abstrac
 Do not introduce species-specific core logic merely to obtain a faster demo.
 
 The first milestone values **causal correctness over content volume and visual polish**.
+
+A core mechanism is not considered sufficiently general merely because it works on the active quadruped. Where relevant, acceptance should demonstrate the same rule on passive structures, non-Agent machines, and Agent-bearing Entities without adding type-specific outcome logic.
