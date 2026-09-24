@@ -17,6 +17,13 @@ export interface PhysicalContact {
   readonly impulseNs: number;
 }
 
+export interface ConnectionLoad {
+  /** Estimated connection force magnitude in newtons. */
+  readonly forceN: number;
+  /** Estimated connection torque magnitude in newton metres. */
+  readonly torqueNm: number;
+}
+
 export interface RayHit {
   readonly distance: number;
   readonly point: Vector3;
@@ -64,6 +71,8 @@ export interface PhysicsAdapter {
   readPartImpactImpulse(body: PhysicsBody, partId: string): number;
   /** Actual narrow-phase contacts from the last completed step, excluding applied free impulses. */
   readPartContacts(body: PhysicsBody, partId: string): readonly PhysicalContact[];
+  /** Estimated load at a live structural connection from the most recent completed step. */
+  readConnectionLoad(body: PhysicsBody, connectionId: string): ConnectionLoad;
   readPartAngularVelocity(body: PhysicsBody, partId: string): Vector3;
   /** First physical surface along a ray, excluding only the mounting Part collider. */
   castSensorRay(origin: Vector3, direction: Vector3, range: number, excludePartHandle: BodyHandle): RayHit | null;

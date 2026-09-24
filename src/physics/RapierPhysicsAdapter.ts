@@ -5,6 +5,7 @@ import type {
   BodyHandle,
   BoxSpec,
   PhysicalContact,
+  ConnectionLoad,
   PhysicsAdapter,
   RayHit,
   ReconstructBodyOptions,
@@ -12,6 +13,8 @@ import type {
 import type { PhysicsBody } from './PhysicsBody';
 
 interface RuntimeConnection {
+  readonly fromPartId: string;
+  readonly toPartId: string;
   readonly kind: Connection['kind'];
   readonly axis?: Vector3;
   readonly from: RAPIER.RigidBody;
@@ -22,6 +25,7 @@ interface RuntimeConnection {
   readonly initialRelativeRotation?: Quaternion;
   jointHandle?: number;
   broken: boolean;
+  actuatorOutput?: number;
 }
 
 interface RuntimePhysicsBody {
@@ -31,7 +35,57 @@ interface RuntimePhysicsBody {
   readonly latestPartImpulses: Map<string, number>;
   readonly pendingPartImpulses: Map<string, number>;
   readonly latestContacts: Map<string, PhysicalContact[]>;
+  readonly latestConnectionLoads: Map<string, ConnectionLoad>;
   readonly partColliders: Map<string, RAPIER.Collider>;
+}
+
+interface MomentumSnapshot {
+  readonly linearVelocity: Vector3;
+  readonly angularVelocity: Vector3;
+  readonly position: Vector3;
+  readonly mass: number;
+  readonly inertia: readonly [number, number, number, number, number, number];
+}
+
+interface AppliedWrench { force: Vector3; torque: Vector3 }
+
+function add(a: Vector3, b: Vector3): Vector3 { return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }; }
+function scale(v: Vector3, n: number): Vector3 { return { x: v.x * n, y: v.y * n, z: v.z * n }; }
+function cross(a: Vector3, b: Vector3): Vector3 {
+  return { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x };
+}
+function magnitude(v: Vector3): number { return Math.hypot(v.x, v.y, v.z); }
+
+function momentumSnapshot(body: RAPIER.RigidBody): MomentumSnapshot {
+  const inverse = body.effectiveWorldInvInertia();
+  // Rapier's matrix uses a shared scratch buffer. Copy every scalar before
+  // another Rapier getter overwrites that buffer.
+  const inertia: MomentumSnapshot['inertia'] = [inverse.m11, inverse.m12, inverse.m13, inverse.m22, inverse.m23, inverse.m33];
+  const position = body.translation();
+  const linearVelocity = body.linvel();
+  const angularVelocity = body.angvel();
+  return {
+    position: { x: position.x, y: position.y, z: position.z },
+    linearVelocity: { x: linearVelocity.x, y: linearVelocity.y, z: linearVelocity.z },
+    angularVelocity: { x: angularVelocity.x, y: angularVelocity.y, z: angularVelocity.z },
+    mass: body.mass(),
+    inertia,
+  };
+}
+
+function angularMomentum(state: MomentumSnapshot): Vector3 {
+  const [a, b, c, d, e, f] = state.inertia;
+  const determinant = a * (d * f - e * e) - b * (b * f - c * e) + c * (b * e - c * d);
+  if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-15) return { x: 0, y: 0, z: 0 };
+  // Invert Rapier's symmetric world inverse-inertia tensor, then multiply by angular velocity.
+  const i11 = (d * f - e * e) / determinant;
+  const i12 = (c * e - b * f) / determinant;
+  const i13 = (b * e - c * d) / determinant;
+  const i22 = (a * f - c * c) / determinant;
+  const i23 = (b * c - a * e) / determinant;
+  const i33 = (a * d - b * b) / determinant;
+  const w = state.angularVelocity;
+  return { x: i11 * w.x + i12 * w.y + i13 * w.z, y: i12 * w.x + i22 * w.y + i23 * w.z, z: i13 * w.x + i23 * w.y + i33 * w.z };
 }
 
 interface PartRuntimeReference {
@@ -194,6 +248,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
   private readonly partRuntimeReferences = new Map<BodyHandle, PartRuntimeReference>();
   private readonly colliderRuntimeReferences = new Map<number, PartRuntimeReference>();
   private readonly stepScopedForceBodies = new Set<RAPIER.RigidBody>();
+  private readonly appliedWrenches = new Map<RAPIER.RigidBody, AppliedWrench>();
   private readonly staticWorldBoxHandles = new Set<BodyHandle>();
   private nextHandle = 1;
 
@@ -369,6 +424,8 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
         z: initialToAnchor.z - initialFromAnchor.z,
       };
       runtimeConnections.set(connection.id, {
+        fromPartId: connection.fromPartId,
+        toPartId: connection.toPartId,
         kind: connection.kind,
         ...(axis ? {
           axis,
@@ -392,6 +449,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       latestPartImpulses: new Map(entity.blueprint.parts.map((part) => [part.id, 0])),
       pendingPartImpulses: new Map(),
       latestContacts: new Map(entity.blueprint.parts.map((part) => [part.id, []])),
+      latestConnectionLoads: new Map(activeConnections.map((connection) => [connection.id, { forceN: 0, torqueNm: 0 }])),
       partColliders,
     };
     const physicsBody: PhysicsBody = {
@@ -412,6 +470,13 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       this.colliderRuntimeReferences.set(partColliders.get(part.id)!.handle, reference);
     }
     return physicsBody;
+  }
+
+  private recordWrench(body: RAPIER.RigidBody, force: Vector3, torque: Vector3): void {
+    const current = this.appliedWrenches.get(body) ?? { force: { x: 0, y: 0, z: 0 }, torque: { x: 0, y: 0, z: 0 } };
+    current.force = add(current.force, force);
+    current.torque = add(current.torque, torque);
+    this.appliedWrenches.set(body, current);
   }
 
   removeBody(body: PhysicsBody): void {
@@ -448,6 +513,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       connection.broken = true;
       runtimeBody.connectionHandles.delete(connectionId);
       runtimeBody.connections.delete(connectionId);
+      runtimeBody.latestConnectionLoads.delete(connectionId);
     }
 
     for (const [partId, handle] of removedHandles) {
@@ -456,6 +522,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       if (collider) this.colliderRuntimeReferences.delete(collider.handle);
       this.partRuntimeReferences.delete(handle);
       this.stepScopedForceBodies.delete(part);
+      this.appliedWrenches.delete(part);
       runtimeBody.partColliders.delete(partId);
       runtimeBody.latestPartImpulses.delete(partId);
       runtimeBody.pendingPartImpulses.delete(partId);
@@ -499,6 +566,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     const body = this.bodies.get(handle);
     if (!body) throw new Error(`Unknown body handle: ${handle}`);
     body.addForce(force, true);
+    this.recordWrench(body, force, { x: 0, y: 0, z: 0 });
     this.stepScopedForceBodies.add(body);
   }
 
@@ -530,6 +598,15 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     const contacts = runtimeBody.latestContacts.get(partId);
     if (!contacts) throw new Error(`Unknown part id: ${partId}`);
     return contacts;
+  }
+
+  readConnectionLoad(body: PhysicsBody, connectionId: string): ConnectionLoad {
+    const runtimeBody = this.runtimeBodies.get(body);
+    if (!runtimeBody) throw new Error('Unknown physics body');
+    const connection = runtimeBody.connections.get(connectionId);
+    if (!connection) throw new Error(`Unknown connection id: ${connectionId}`);
+    if (connection.broken) return { forceN: 0, torqueNm: 0 };
+    return runtimeBody.latestConnectionLoads.get(connectionId) ?? { forceN: 0, torqueNm: 0 };
   }
 
   readPartAngularVelocity(body: PhysicsBody, partId: string): Vector3 {
@@ -589,12 +666,23 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     const axis = unitVector(rotate(connection.axis, connection.from.rotation()));
     const effort = { x: axis.x * output, y: axis.y * output, z: axis.z * output };
     if (connection.kind === 'prismatic') {
-      connection.from.addForceAtPoint(negate(effort), worldPoint(connection.from, connection.fromAnchor), true);
-      connection.to.addForceAtPoint(effort, worldPoint(connection.to, connection.toAnchor), true);
+      const fromForce = negate(effort);
+      const toForce = effort;
+      const fromPoint = worldPoint(connection.from, connection.fromAnchor);
+      const toPoint = worldPoint(connection.to, connection.toAnchor);
+      connection.from.addForceAtPoint(fromForce, fromPoint, true);
+      connection.to.addForceAtPoint(toForce, toPoint, true);
+      const fromCom = { ...connection.from.worldCom() };
+      const toCom = { ...connection.to.worldCom() };
+      this.recordWrench(connection.from, fromForce, cross(add(fromPoint, scale(fromCom, -1)), fromForce));
+      this.recordWrench(connection.to, toForce, cross(add(toPoint, scale(toCom, -1)), toForce));
     } else {
       connection.from.addTorque(negate(effort), true);
       connection.to.addTorque(effort, true);
+      this.recordWrench(connection.from, { x: 0, y: 0, z: 0 }, negate(effort));
+      this.recordWrench(connection.to, { x: 0, y: 0, z: 0 }, effort);
     }
+    connection.actuatorOutput = output;
     this.stepScopedForceBodies.add(connection.from);
     this.stepScopedForceBodies.add(connection.to);
   }
@@ -660,6 +748,13 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
 
   step(seconds: number): void {
     if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('Physics step must be positive and finite');
+    const before = new Map<RAPIER.RigidBody, MomentumSnapshot>();
+    for (const runtimeBody of this.activeRuntimeBodies) {
+      for (const connection of runtimeBody.connections.values()) {
+        before.set(connection.from, momentumSnapshot(connection.from));
+        before.set(connection.to, momentumSnapshot(connection.to));
+      }
+    }
     for (const runtimeBody of this.activeRuntimeBodies) {
       for (const partId of runtimeBody.latestPartImpulses.keys()) runtimeBody.latestPartImpulses.set(partId, 0);
       for (const contacts of runtimeBody.latestContacts.values()) contacts.length = 0;
@@ -696,6 +791,70 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
         );
       }
     });
+
+    // Rapier 0.20 exposes no public joint reaction API. Estimate endpoint
+    // reactions from momentum change minus gravity and forces/torques explicitly
+    // submitted through this adapter. With a contact-free endpoint, its residual
+    // isolates the joint reaction best. If both endpoints contact the world,
+    // choose the one with fewer recorded contact points. Multi-joint attribution
+    // remains approximate because endpoint residuals include every incident joint.
+    const gravity: Vector3 = { x: 0, y: -9.81, z: 0 };
+    for (const runtimeBody of this.activeRuntimeBodies) {
+      for (const [connectionId, connection] of runtimeBody.connections) {
+        if (connection.broken) {
+          runtimeBody.latestConnectionLoads.set(connectionId, { forceN: 0, torqueNm: 0 });
+          continue;
+        }
+        const fromBefore = before.get(connection.from)!;
+        const toBefore = before.get(connection.to)!;
+        const fromAfter = momentumSnapshot(connection.from);
+        const toAfter = momentumSnapshot(connection.to);
+        const fromContactCount = runtimeBody.latestContacts.get(connection.fromPartId)?.length ?? 0;
+        const toContactCount = runtimeBody.latestContacts.get(connection.toPartId)?.length ?? 0;
+        // When contact counts tie, the lighter endpoint usually exposes the
+        // transmitted reaction with less cancellation by a heavy support.
+        const useFrom = fromContactCount < toContactCount
+          || (fromContactCount === toContactCount && fromBefore.mass <= toBefore.mass);
+        const oldState = useFrom ? fromBefore : toBefore;
+        const newState = useFrom ? fromAfter : toAfter;
+        const endpoint = useFrom ? connection.from : connection.to;
+        const known = this.appliedWrenches.get(endpoint) ?? { force: { x: 0, y: 0, z: 0 }, torque: { x: 0, y: 0, z: 0 } };
+        const deltaVelocity = {
+          x: newState.linearVelocity.x - oldState.linearVelocity.x,
+          y: newState.linearVelocity.y - oldState.linearVelocity.y,
+          z: newState.linearVelocity.z - oldState.linearVelocity.z,
+        };
+        const endpointGravity = scale(gravity, endpoint.gravityScale());
+        const forceResidual = add(add(scale(deltaVelocity, oldState.mass / seconds), scale(endpointGravity, -oldState.mass)), scale(known.force, -1));
+        const oldAngularMomentum = angularMomentum(oldState);
+        const newAngularMomentum = angularMomentum(newState);
+        const torqueResidual = add(scale({
+          x: newAngularMomentum.x - oldAngularMomentum.x,
+          y: newAngularMomentum.y - oldAngularMomentum.y,
+          z: newAngularMomentum.z - oldAngularMomentum.z,
+        }, 1 / seconds), scale(known.torque, -1));
+        let forceN = magnitude(forceResidual);
+        let torqueNm = magnitude(torqueResidual);
+        const endpointContactCount = useFrom ? fromContactCount : toContactCount;
+        if (endpointContactCount > 0 && connection.actuatorOutput !== undefined && connection.axis) {
+          const axis = unitVector(rotate(connection.axis, connection.from.rotation()));
+          if (connection.kind === 'revolute') {
+            // A blocked endpoint's contact reaction balances actuator output,
+            // reduced by the angular-momentum change observed during this step.
+            const observed = dot({
+              x: newAngularMomentum.x - oldAngularMomentum.x,
+              y: newAngularMomentum.y - oldAngularMomentum.y,
+              z: newAngularMomentum.z - oldAngularMomentum.z,
+            }, axis) / seconds;
+            torqueNm = Math.abs(connection.actuatorOutput - observed);
+          } else if (connection.kind === 'prismatic') {
+            const observed = dot(deltaVelocity, axis) * oldState.mass / seconds;
+            forceN = Math.abs(connection.actuatorOutput - observed);
+          }
+        }
+        runtimeBody.latestConnectionLoads.set(connectionId, { forceN, torqueNm });
+      }
+    }
     for (const runtimeBody of this.activeRuntimeBodies) {
       for (const [partId, impulse] of runtimeBody.pendingPartImpulses) {
         runtimeBody.latestPartImpulses.set(
@@ -713,6 +872,10 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       body.resetTorques(false);
     }
     this.stepScopedForceBodies.clear();
+    this.appliedWrenches.clear();
+    for (const runtimeBody of this.activeRuntimeBodies) {
+      for (const connection of runtimeBody.connections.values()) connection.actuatorOutput = undefined;
+    }
   }
 
   readPose(handle: BodyHandle): Pose {

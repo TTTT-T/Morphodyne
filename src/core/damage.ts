@@ -13,6 +13,8 @@ export interface DamageState {
   readonly deformation: number;
   /** Accumulated load above the material yield threshold, in N·s. */
   readonly accumulatedImpulseNs: number;
+  /** Normalized sustained overload integral; 1.0 corresponds to 1 s at 2x yield. */
+  readonly accumulatedOverloadSeconds?: number;
 }
 
 export interface PartState {
@@ -43,6 +45,10 @@ export interface ConnectionLoad {
   readonly connectionId: string;
   /** Magnitude of the impulse carried by the connection, in N·s. */
   readonly impulseNs: number;
+  /** Sustained force and torque magnitudes, in N and N·m, sampled for seconds. */
+  readonly forceN?: number;
+  readonly torqueNm?: number;
+  readonly seconds?: number;
   readonly tick?: number;
 }
 
@@ -57,6 +63,9 @@ export interface DamageEvent {
   readonly connectionId: string;
   readonly partIds: readonly [string, string];
   readonly impulseNs: number;
+  readonly forceN?: number;
+  readonly torqueNm?: number;
+  readonly seconds?: number;
   readonly tick?: number;
   readonly previousState: DamageCondition;
   readonly state: DamageCondition;
@@ -112,7 +121,35 @@ function initialDamage(): DamageState {
     integrity: 1,
     deformation: 0,
     accumulatedImpulseNs: 0,
+    accumulatedOverloadSeconds: 0,
   };
+}
+
+function forceYield(material: Material): number { return material.yieldForceN ?? Number.POSITIVE_INFINITY; }
+function torqueYield(material: Material): number { return material.yieldTorqueNm ?? Number.POSITIVE_INFINITY; }
+function forceUltimate(material: Material): number { return material.ultimateForceN ?? Number.POSITIVE_INFINITY; }
+function torqueUltimate(material: Material): number { return material.ultimateTorqueNm ?? Number.POSITIVE_INFINITY; }
+function channelYield(connection: Connection, from: Material, to: Material, channel: 'ForceN' | 'TorqueNm'): number {
+  const override = connection[`yield${channel}`];
+  return override ?? Math.min(channel === 'ForceN' ? forceYield(from) : torqueYield(from), channel === 'ForceN' ? forceYield(to) : torqueYield(to));
+}
+function channelUltimate(connection: Connection, from: Material, to: Material, channel: 'ForceN' | 'TorqueNm'): number {
+  const override = connection[`ultimate${channel}`];
+  return override ?? Math.min(channel === 'ForceN' ? forceUltimate(from) : torqueUltimate(from), channel === 'ForceN' ? forceUltimate(to) : torqueUltimate(to));
+}
+
+function evolveSustained(current: DamageState, force: number, torque: number, seconds: number,
+  forceYieldN: number, torqueYieldNm: number, forceUltimateN: number, torqueUltimateNm: number): DamageState {
+  const ultimate = force >= forceUltimateN || torque >= torqueUltimateNm;
+  const forceRatio = Number.isFinite(forceYieldN) ? force / forceYieldN : 0;
+  const torqueRatio = Number.isFinite(torqueYieldNm) ? torque / torqueYieldNm : 0;
+  const increment = seconds * Math.max(0, forceRatio - 1, torqueRatio - 1);
+  const accumulatedOverloadSeconds = Math.min(1, (current.accumulatedOverloadSeconds ?? 0) + increment);
+  const fractured = ultimate || current.state === 'fractured' || current.state === 'separated' || accumulatedOverloadSeconds >= 1;
+  if (fractured) return { ...current, state: 'fractured', integrity: 0, deformation: 1, accumulatedOverloadSeconds };
+  if (increment === 0) return current;
+  const deformation = Math.max(current.deformation, accumulatedOverloadSeconds);
+  return { ...current, state: 'degraded', integrity: 1 - deformation, deformation, accumulatedOverloadSeconds };
 }
 
 /** Create intact structural state for every declared Part and Connection. */
@@ -204,19 +241,21 @@ function evolveDamage(
         integrity: 0,
         deformation: 1,
         accumulatedImpulseNs,
+        accumulatedOverloadSeconds: current.accumulatedOverloadSeconds,
       },
       residualLoadCapacityNs: 0,
       accumulatedChanged,
     };
   }
 
-  const deformation = clampUnit(accumulatedImpulseNs / nominalCapacityNs);
+  const deformation = clampUnit(Math.max(accumulatedImpulseNs / nominalCapacityNs, current.deformation));
   return {
     damage: {
       state: accumulatedImpulseNs > 0 ? 'degraded' : current.state,
       integrity: 1 - deformation,
       deformation,
       accumulatedImpulseNs,
+      accumulatedOverloadSeconds: current.accumulatedOverloadSeconds,
     },
     residualLoadCapacityNs: nominalCapacityNs * (1 - deformation),
     accumulatedChanged,
@@ -229,11 +268,15 @@ function addPartEvent(
   next: PartState,
   connection: Connection,
   impulseNs: number,
+  forceN: number | undefined,
+  torqueNm: number | undefined,
+  seconds: number | undefined,
   tick: number | undefined,
 ): void {
   const nextState = next.damage.state;
   const previousState = current.damage.state;
-  const accumulatedChanged = next.damage.accumulatedImpulseNs > current.damage.accumulatedImpulseNs;
+  const accumulatedChanged = next.damage.accumulatedImpulseNs > current.damage.accumulatedImpulseNs
+    || (next.damage.accumulatedOverloadSeconds ?? 0) > (current.damage.accumulatedOverloadSeconds ?? 0);
   if (nextState === 'fractured' && previousState !== 'fractured' && previousState !== 'separated') {
     events.push({
       kind: 'fracture',
@@ -243,6 +286,7 @@ function addPartEvent(
       connectionId: connection.id,
       partIds: [connection.fromPartId, connection.toPartId],
       impulseNs,
+      forceN, torqueNm, seconds,
       tick,
       previousState,
       state: nextState,
@@ -258,6 +302,7 @@ function addPartEvent(
       connectionId: connection.id,
       partIds: [connection.fromPartId, connection.toPartId],
       impulseNs,
+      forceN, torqueNm, seconds,
       tick,
       previousState,
       state: nextState,
@@ -272,12 +317,16 @@ function addConnectionEvents(
   current: ConnectionState,
   next: ConnectionState,
   impulseNs: number,
+  forceN: number | undefined,
+  torqueNm: number | undefined,
+  seconds: number | undefined,
   tick: number | undefined,
 ): void {
   const partIds: readonly [string, string] = [next.fromPartId, next.toPartId];
   const previousState = current.damage.state;
   const nextState = next.damage.state;
-  const accumulatedChanged = next.damage.accumulatedImpulseNs > current.damage.accumulatedImpulseNs;
+  const accumulatedChanged = next.damage.accumulatedImpulseNs > current.damage.accumulatedImpulseNs
+    || (next.damage.accumulatedOverloadSeconds ?? 0) > (current.damage.accumulatedOverloadSeconds ?? 0);
   if (nextState === 'separated' && previousState !== 'separated') {
     if (previousState !== 'fractured') {
       events.push({
@@ -287,6 +336,7 @@ function addConnectionEvents(
         connectionId: next.connectionId,
         partIds,
         impulseNs,
+        forceN, torqueNm, seconds,
         tick,
         previousState,
         state: 'fractured',
@@ -301,6 +351,7 @@ function addConnectionEvents(
       connectionId: next.connectionId,
       partIds,
       impulseNs,
+      forceN, torqueNm, seconds,
       tick,
       previousState: 'fractured',
       state: 'separated',
@@ -315,6 +366,7 @@ function addConnectionEvents(
       connectionId: next.connectionId,
       partIds,
       impulseNs,
+      forceN, torqueNm, seconds,
       tick,
       previousState,
       state: nextState,
@@ -336,6 +388,10 @@ export function applyConnectionLoad(
   if (!Number.isFinite(load.impulseNs) || load.impulseNs < 0) {
     throw new RangeError(`Connection impulse must be finite and non-negative: ${load.connectionId}`);
   }
+  for (const [name, value] of [['forceN', load.forceN], ['torqueNm', load.torqueNm], ['seconds', load.seconds]] as const) {
+    if (value !== undefined && (!Number.isFinite(value) || value < 0)) throw new RangeError(`Connection ${name} must be finite and non-negative: ${load.connectionId}`);
+  }
+  if ((load.forceN !== undefined || load.torqueNm !== undefined) && (load.seconds === undefined || load.seconds <= 0)) throw new RangeError(`Sustained connection load requires positive seconds: ${load.connectionId}`);
   if (load.tick !== undefined && !Number.isFinite(load.tick)) {
     throw new RangeError(`Damage event tick must be finite: ${load.connectionId}`);
   }
@@ -345,7 +401,8 @@ export function applyConnectionLoad(
   const currentFrom = getPartState(state, connection.fromPartId);
   const currentTo = getPartState(state, connection.toPartId);
 
-  if (!currentConnection.connected || load.impulseNs === 0) {
+  const hasSustainedLoad = (load.forceN ?? 0) > 0 || (load.torqueNm ?? 0) > 0;
+  if (!currentConnection.connected || (load.impulseNs === 0 && !hasSustainedLoad)) {
     return {
       state,
       events: [],
@@ -356,8 +413,17 @@ export function applyConnectionLoad(
 
   const fromMaterial = materialFor(blueprint, currentFrom.materialId);
   const toMaterial = materialFor(blueprint, currentTo.materialId);
+  const forceN = load.forceN ?? 0;
+  const torqueNm = load.torqueNm ?? 0;
+  const seconds = load.seconds ?? 0;
+  const connectionForceYield = channelYield(connection, fromMaterial, toMaterial, 'ForceN');
+  const connectionTorqueYield = channelYield(connection, fromMaterial, toMaterial, 'TorqueNm');
+  const connectionForceUltimate = channelUltimate(connection, fromMaterial, toMaterial, 'ForceN');
+  const connectionTorqueUltimate = channelUltimate(connection, fromMaterial, toMaterial, 'TorqueNm');
+  const fromSustained = evolveSustained(currentFrom.damage, forceN, torqueNm, seconds, forceYield(fromMaterial), torqueYield(fromMaterial), forceUltimate(fromMaterial), torqueUltimate(fromMaterial));
+  const toSustained = evolveSustained(currentTo.damage, forceN, torqueNm, seconds, forceYield(toMaterial), torqueYield(toMaterial), forceUltimate(toMaterial), torqueUltimate(toMaterial));
   const nextFromDamage = evolveDamage(
-    currentFrom.damage,
+    fromSustained,
     materialToughness(fromMaterial),
     materialYield(fromMaterial),
     load.impulseNs,
@@ -365,7 +431,7 @@ export function applyConnectionLoad(
     false,
   );
   const nextToDamage = evolveDamage(
-    currentTo.damage,
+    toSustained,
     materialToughness(toMaterial),
     materialYield(toMaterial),
     load.impulseNs,
@@ -385,7 +451,7 @@ export function applyConnectionLoad(
 
   const connectionNominalCapacityNs = connectionCapacity(connection, fromMaterial, toMaterial);
   const nextConnectionDamage = evolveDamage(
-    currentConnection.damage,
+    evolveSustained(currentConnection.damage, forceN, torqueNm, seconds, connectionForceYield, connectionTorqueYield, connectionForceUltimate, connectionTorqueUltimate),
     connectionNominalCapacityNs,
     connectionYield(fromMaterial, toMaterial),
     load.impulseNs,
@@ -405,9 +471,9 @@ export function applyConnectionLoad(
   };
 
   const events: DamageEvent[] = [];
-  addPartEvent(events, currentFrom, nextFrom, connection, load.impulseNs, load.tick);
-  addPartEvent(events, currentTo, nextTo, connection, load.impulseNs, load.tick);
-  addConnectionEvents(events, currentConnection, nextConnection, load.impulseNs, load.tick);
+  addPartEvent(events, currentFrom, nextFrom, connection, load.impulseNs, load.forceN, load.torqueNm, load.seconds, load.tick);
+  addPartEvent(events, currentTo, nextTo, connection, load.impulseNs, load.forceN, load.torqueNm, load.seconds, load.tick);
+  addConnectionEvents(events, currentConnection, nextConnection, load.impulseNs, load.forceN, load.torqueNm, load.seconds, load.tick);
 
   const connections: Record<string, ConnectionState> = {
     ...state.connections,
@@ -430,7 +496,7 @@ export function applyConnectionLoad(
         connected: false,
       };
       connections[adjacent.id] = separated;
-      addConnectionEvents(events, current, separated, load.impulseNs, load.tick);
+      addConnectionEvents(events, current, separated, load.impulseNs, load.forceN, load.torqueNm, load.seconds, load.tick);
     }
   }
 

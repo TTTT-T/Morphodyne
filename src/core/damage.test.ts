@@ -161,4 +161,51 @@ describe('structural damage core', () => {
     expect(second.events).toEqual([]);
     expect(second.state).toBe(first.state);
   });
+
+  it('does not accumulate repeated sustained sub-yield force', () => {
+    const base = blueprint(20);
+    const structure: Blueprint = { ...base, connections: [{ ...base.connections[0], yieldForceN: 10, ultimateForceN: 30 }] };
+    let state = createDamageState(structure);
+    for (let index = 0; index < 20; index += 1) {
+      state = applyConnectionLoad(state, structure, { connectionId: 'link', impulseNs: 0, forceN: 9, seconds: 1 }).state;
+    }
+    expect(getConnectionState(state, 'link').damage.state).toBe('intact');
+    expect(getConnectionState(state, 'link').damage.accumulatedOverloadSeconds).toBe(0);
+  });
+
+  it('deforms and then separates under sustained force without collision impulse', () => {
+    const base = blueprint(100);
+    const structure: Blueprint = { ...base, connections: [{ ...base.connections[0], yieldForceN: 10, ultimateForceN: 40 }] };
+    let state = createDamageState(structure);
+    state = applyConnectionLoad(state, structure, { connectionId: 'link', impulseNs: 0, forceN: 15, seconds: 1 }).state;
+    expect(getConnectionState(state, 'link').damage.state).toBe('degraded');
+    expect(getConnectionState(state, 'link').damage.deformation).toBeCloseTo(0.5);
+    const result = applyConnectionLoad(state, structure, { connectionId: 'link', impulseNs: 0, forceN: 15, seconds: 1 });
+    expect(getConnectionState(result.state, 'link').connected).toBe(false);
+    expect(result.events.map((event) => event.kind)).toContain('separation');
+    expect(result.events.find((event) => event.kind === 'separation')).toMatchObject({ impulseNs: 0, forceN: 15, seconds: 1 });
+  });
+
+  it('fractures and separates when sustained torque exceeds ultimate capacity', () => {
+    const base = blueprint(100);
+    const structure: Blueprint = { ...base, connections: [{ ...base.connections[0], yieldTorqueNm: 5, ultimateTorqueNm: 20 }] };
+    const result = applyConnectionLoad(createDamageState(structure), structure, { connectionId: 'link', impulseNs: 0, torqueNm: 20, seconds: 0.01 });
+    expect(getConnectionState(result.state, 'link').connected).toBe(false);
+    expect(result.events).toContainEqual(expect.objectContaining({ kind: 'separation', torqueNm: 20 }));
+  });
+
+  it('validates continuous thresholds as positive finite values and ordered pairs', () => {
+    const base = blueprint(100);
+    const structure: Blueprint = { ...base, materials: [{ ...material, yieldForceN: 10, ultimateForceN: 10 }], connections: [{ ...base.connections[0], yieldTorqueNm: 0 }] };
+    expect(validateBlueprint(structure)).toEqual(['Invalid force thresholds: material', 'Invalid yieldTorqueNm: link']);
+  });
+
+  it('rejects a connection override whose effective yield exceeds material ultimate', () => {
+    const base = blueprint(100);
+    const structure: Blueprint = { ...base,
+      materials: [{ ...material, ultimateForceN: 10 }],
+      connections: [{ ...base.connections[0], yieldForceN: 20 }],
+    };
+    expect(validateBlueprint(structure)).toContain('Invalid effective force thresholds: link');
+  });
 });
