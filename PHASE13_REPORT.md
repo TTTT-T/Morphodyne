@@ -46,3 +46,9 @@ The browser bootstrap constructs `RapierPhysicsAdapter` and the presentation loo
 - Validated on Mac browser and automated suite. Windows was not required for this Phase and was not run.
 
 Phase 13 is submitted for final v0.2 review; v0.3 work has not started.
+
+## Review handoff
+
+- Implementation commit: `38e5d6f` (`Build Phase 13 playable construction sandbox`).
+- Review branch: `codex/phase-13-playable-sandbox`, based on `main` at `9300797`.
+- Pull request: [#18 — Phase 13: Playable Construction Sandbox](https://github.com/TTTT-T/Morphodyne/pull/18), targeting `main`.
