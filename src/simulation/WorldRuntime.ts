@@ -1,10 +1,12 @@
 import type { ControlSignal, EnergySource } from '../core/actuation';
 import type { DamageEvent } from '../core/damage';
+import type { EnvironmentSpec } from '../core/environment';
 import type { Entity, EntityId, Pose, Vector3 } from '../core/model';
 import { deriveStructuralComponents } from '../core/structureOwnership';
 import type { PhysicsAdapter } from '../physics/PhysicsAdapter';
 import type { PhysicsBody } from '../physics/PhysicsBody';
 import { FixedStepSimulation } from './FixedStepSimulation';
+import { EnvironmentRuntime, type PartEnvironmentView, type PhysicalPartView } from './EnvironmentRuntime';
 import { JointActuatorRuntime } from './JointActuatorRuntime';
 import { SensorRuntime, type SensorObservation } from './SensorRuntime';
 import { StructuralDamageRuntime } from './StructuralDamageRuntime';
@@ -66,8 +68,10 @@ export class WorldRuntime {
   private readonly issuedIds = new Set<EntityId>();
   private nextFragmentId = 1;
   private readonly simulation: FixedStepSimulation;
+  readonly environment: EnvironmentRuntime;
 
-  constructor(private readonly physics: PhysicsAdapter) {
+  constructor(private readonly physics: PhysicsAdapter, environment: EnvironmentSpec = {}) {
+    this.environment = new EnvironmentRuntime(physics, environment);
     this.simulation = new FixedStepSimulation(physics,
       (seconds, tick) => this.beforePhysicsStep(seconds, tick),
       (seconds, tick) => this.afterPhysicsStep(seconds, tick));
@@ -177,7 +181,32 @@ export class WorldRuntime {
     return this.requireEntity(entityId).damage;
   }
 
+  /** Debug truth only; Agent control receives observations through SensorRuntime. */
+  inspectPartEnvironment(componentId: EntityId, partId: string): PartEnvironmentView {
+    const record = this.findComponentOwner(componentId);
+    if (!record.components.get(componentId)!.view.partIds.includes(partId)) {
+      throw new Error(`Part ${partId} is not owned by component ${componentId}`);
+    }
+    const part = record.entity.blueprint.parts.find((candidate) => candidate.id === partId)!;
+    return this.environment.inspectPart({
+      handle: record.body.partHandles.get(partId)!, geometry: part.geometry, pose: record.body.readPartPose(partId),
+    });
+  }
+
+  private physicalParts(): PhysicalPartView[] {
+    const parts: PhysicalPartView[] = [];
+    for (const record of this.entities.values()) {
+      for (const part of record.entity.blueprint.parts) {
+        if (!record.livePartIds.has(part.id)) continue;
+        parts.push({ handle: record.body.partHandles.get(part.id)!, geometry: part.geometry,
+          pose: record.body.readPartPose(part.id) });
+      }
+    }
+    return parts;
+  }
+
   private beforePhysicsStep(seconds: number, tick: number): void {
+    this.environment.beforePhysicsStep(this.physicalParts());
     for (const record of this.entities.values()) {
       const signals = record.agent?.control(seconds, tick) ?? record.control?.(seconds, tick) ?? [];
       if (!record.actuator) continue;
