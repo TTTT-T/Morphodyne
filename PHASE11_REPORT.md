@@ -45,4 +45,4 @@ The same test also verifies that Construction-style structure replacement preser
 - Windows / browser: not run for this Phase; the changed runtime was validated through the real Rapier backend on Mac.
 - No architecture deviation or unresolved implementation blocker. The pre-step mechanical-work approximation above is the main known accuracy limit.
 
-Review handoff: PR targeting `main` will be linked here after creation. Phase 12 has not been started.
+Review handoff: implementation commit `f3c520d`; [PR #16](https://github.com/TTTT-T/Morphodyne/pull/16) targets `main`. Phase 12 has not been started.
