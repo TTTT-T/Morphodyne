@@ -27,6 +27,12 @@ export interface Material {
   readonly yieldImpulseNs?: number;
   /** Optional cumulative impulse tolerance before the material fractures (N·s). */
   readonly toughnessImpulseNs?: number;
+  /** Sustained-force yield/ultimate thresholds. Omitted capacities are unbounded. */
+  readonly yieldForceN?: number;
+  readonly ultimateForceN?: number;
+  /** Sustained-torque yield/ultimate thresholds. Omitted capacities are unbounded. */
+  readonly yieldTorqueNm?: number;
+  readonly ultimateTorqueNm?: number;
 }
 
 export type Geometry =
@@ -91,6 +97,11 @@ export interface ConnectionBase {
   readonly toPartId: string;
   /** Optional impulse capacity of this structural connection (N·s). */
   readonly strengthImpulseNs?: number;
+  /** Optional sustained-load thresholds; omitted capacities are unbounded. */
+  readonly yieldForceN?: number;
+  readonly ultimateForceN?: number;
+  readonly yieldTorqueNm?: number;
+  readonly ultimateTorqueNm?: number;
   /** Anchor expressed in the local frame of the corresponding part. */
   readonly fromAnchor: Vector3;
   /** Anchor expressed in the local frame of the corresponding part. */
@@ -254,6 +265,12 @@ export function validateBlueprint(blueprint: Blueprint): string[] {
     if (material.toughnessImpulseNs !== undefined && (!Number.isFinite(material.toughnessImpulseNs) || material.toughnessImpulseNs <= 0)) {
       errors.push(`Invalid toughnessImpulseNs: ${material.id}`);
     }
+    for (const field of ['yieldForceN', 'ultimateForceN', 'yieldTorqueNm', 'ultimateTorqueNm'] as const) {
+      const value = material[field];
+      if (value !== undefined && (!Number.isFinite(value) || value <= 0)) errors.push(`Invalid ${field}: ${material.id}`);
+    }
+    if (material.yieldForceN !== undefined && material.ultimateForceN !== undefined && material.yieldForceN >= material.ultimateForceN) errors.push(`Invalid force thresholds: ${material.id}`);
+    if (material.yieldTorqueNm !== undefined && material.ultimateTorqueNm !== undefined && material.yieldTorqueNm >= material.ultimateTorqueNm) errors.push(`Invalid torque thresholds: ${material.id}`);
   }
 
   const partIds = new Set<string>();
@@ -276,6 +293,30 @@ export function validateBlueprint(blueprint: Blueprint): string[] {
     if (connection.strengthImpulseNs !== undefined
       && (!Number.isFinite(connection.strengthImpulseNs) || connection.strengthImpulseNs <= 0)) {
       errors.push(`Invalid strengthImpulseNs: ${connection.id}`);
+    }
+    for (const field of ['yieldForceN', 'ultimateForceN', 'yieldTorqueNm', 'ultimateTorqueNm'] as const) {
+      const value = connection[field];
+      if (value !== undefined && (!Number.isFinite(value) || value <= 0)) errors.push(`Invalid ${field}: ${connection.id}`);
+    }
+    if (connection.yieldForceN !== undefined && connection.ultimateForceN !== undefined && connection.yieldForceN >= connection.ultimateForceN) errors.push(`Invalid force thresholds: ${connection.id}`);
+    if (connection.yieldTorqueNm !== undefined && connection.ultimateTorqueNm !== undefined && connection.yieldTorqueNm >= connection.ultimateTorqueNm) errors.push(`Invalid torque thresholds: ${connection.id}`);
+    if (connection.yieldForceN !== undefined || connection.ultimateForceN !== undefined
+      || connection.yieldTorqueNm !== undefined || connection.ultimateTorqueNm !== undefined) {
+      const fromMaterial = blueprint.materials.find((material) => material.id === parts.get(connection.fromPartId)?.materialId);
+      const toMaterial = blueprint.materials.find((material) => material.id === parts.get(connection.toPartId)?.materialId);
+      if (fromMaterial && toMaterial) {
+        for (const [channel, yieldField, ultimateField] of [
+          ['force', 'yieldForceN', 'ultimateForceN'], ['torque', 'yieldTorqueNm', 'ultimateTorqueNm'],
+        ] as const) {
+          if (connection[yieldField] === undefined && connection[ultimateField] === undefined) continue;
+          const yieldValue = connection[yieldField] ?? Math.min(fromMaterial[yieldField] ?? Infinity, toMaterial[yieldField] ?? Infinity);
+          const ultimateValue = connection[ultimateField] ?? Math.min(fromMaterial[ultimateField] ?? Infinity, toMaterial[ultimateField] ?? Infinity);
+          if (Number.isFinite(yieldValue) && Number.isFinite(ultimateValue) && yieldValue >= ultimateValue
+            && !(connection[yieldField] !== undefined && connection[ultimateField] !== undefined)) {
+            errors.push(`Invalid effective ${channel} thresholds: ${connection.id}`);
+          }
+        }
+      }
     }
     if (!partIds.has(connection.fromPartId) || !partIds.has(connection.toPartId)) errors.push(`Unknown connection endpoint: ${connection.id}`);
     if (connection.fromPartId === connection.toPartId) errors.push(`Self connection: ${connection.id}`);

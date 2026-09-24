@@ -290,7 +290,7 @@ export class WorldRuntime {
 
   private afterPhysicsStep(seconds: number, tick: number): void {
     for (const record of this.entities.values()) {
-      const events = record.damage.afterPhysicsStep(tick);
+      const events = record.damage.afterPhysicsStep(tick, seconds);
       this.reconcileComponents(record, events, tick);
       for (const component of record.components.values()) component.sensor?.afterPhysicsStep(tick, seconds);
     }
