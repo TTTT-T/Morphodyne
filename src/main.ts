@@ -33,18 +33,21 @@ function entityWorldLine(
     .map((id) => world.inspectComponent(id))
     .filter((component): component is NonNullable<ReturnType<WorldRuntime['inspectComponent']>> => component !== undefined);
   const connectionIds = [...new Set(components.flatMap((component) => component.connectionIds))];
-  return `${entity.id} | P${entity.partIds.length} C${connectionIds.length} A${entity.actuatorIds.length} S${entity.sensorIds.length} | Agent=${entity.agentPresent ? 'yes' : 'no'}`;
+  return `${entity.id} | 部件 ${entity.partIds.length} · 连接 ${connectionIds.length} · 执行器 ${entity.actuatorIds.length} · 传感器 ${entity.sensorIds.length} | Agent：${entity.agentPresent ? '有' : '无'}`;
 }
 
 async function main(): Promise<void> {
   const app = document.querySelector<HTMLDivElement>('#app');
-  if (!app) throw new Error('Missing #app root element');
+  if (!app) throw new Error('缺少页面根元素 #app');
 
-  const panel = document.createElement('div');
+  const panel = document.createElement('details');
   panel.className = 'status';
-  panel.setAttribute('role', 'status');
+  const debugSummary = document.createElement('summary');
+  debugSummary.textContent = '运行信息与 Agent 控制（高级 / 调试）';
+  panel.append(debugSummary);
   app.append(panel);
   const status = document.createElement('div');
+  status.setAttribute('role', 'status');
   panel.append(status);
   const worldStatus = document.createElement('div');
   worldStatus.className = 'world-status';
@@ -113,7 +116,7 @@ async function main(): Promise<void> {
   let skillSnapshot: SkillRuntimeSnapshot | null = null;
   let autonomous = true;
   let intent: ControlIntent = { forward: 0, turn: 0 };
-  let mode = 'Auto · Stand';
+  let mode = '自动 · 站立';
 
   // This callback is the optional Agent composition. WorldRuntime owns the
   // actuator runtime and invokes the callback before its fixed physics step.
@@ -127,7 +130,7 @@ async function main(): Promise<void> {
       if (autonomous) {
         skillSnapshot = skill.update(brainSnapshot);
         intent = skillSnapshot.control;
-        mode = `Auto · ${brainSnapshot.skillIntent.skill}`;
+        mode = `自动 · ${brainSnapshot.skillIntent.skill}`;
       }
     }
 
@@ -218,21 +221,21 @@ async function main(): Promise<void> {
     });
     controls.append(button);
   }
-  addButton('Stand', { forward: 0, turn: 0 });
-  addButton('Forward', { forward: 1, turn: 0 });
-  addButton('Turn left', { forward: 0, turn: -1 });
-  addButton('Turn right', { forward: 0, turn: 1 });
+  addButton('站立', { forward: 0, turn: 0 });
+  addButton('前进', { forward: 1, turn: 0 });
+  addButton('左转', { forward: 0, turn: -1 });
+  addButton('右转', { forward: 0, turn: 1 });
 
   const autoButton = document.createElement('button');
-  autoButton.textContent = 'Auto brain';
+  autoButton.textContent = '恢复自动控制';
   autoButton.addEventListener('click', () => {
     autonomous = true;
-    mode = 'Auto · waiting';
+    mode = '自动 · 等待感知';
   });
   controls.append(autoButton);
 
   const damageButton = document.createElement('button');
-  damageButton.textContent = 'Impact / Damage';
+  damageButton.textContent = '冲击 Agent 测试部件';
   damageButton.addEventListener('click', () => {
     const targetPartId = activeAssemblies[0].partIds[0];
     // A localized opposing impulse pair loads the attachment without
@@ -249,30 +252,13 @@ async function main(): Promise<void> {
   controls.append(damageButton);
 
   const resetButton = document.createElement('button');
-  resetButton.textContent = 'Reset experiment';
+  resetButton.textContent = '重置场景';
   resetButton.addEventListener('click', () => location.reload());
   controls.append(resetButton);
 
-  const rainButton = document.createElement('button');
-  rainButton.textContent = 'Rain';
-  rainButton.addEventListener('click', () => world.environment.setWeather('rain'));
-  controls.append(rainButton);
-  const clearButton = document.createElement('button');
-  clearButton.textContent = 'Clear';
-  clearButton.addEventListener('click', () => world.environment.setWeather('clear'));
-  controls.append(clearButton);
-  const nightButton = document.createElement('button');
-  nightButton.textContent = 'Night';
-  nightButton.addEventListener('click', () => world.environment.setTimeOfDay(0));
-  controls.append(nightButton);
-  const dayButton = document.createElement('button');
-  dayButton.textContent = 'Day';
-  dayButton.addEventListener('click', () => world.environment.setTimeOfDay(12));
-  controls.append(dayButton);
-
   let nextImpactEntityId = 1;
   const impactButton = document.createElement('button');
-  impactButton.textContent = 'External impact';
+  impactButton.textContent = '生成外部冲击物体';
   impactButton.addEventListener('click', () => {
     const coreComponent = world.listComponents().find((component) => component.sourceEntityId === agentId
       && component.partIds.includes('part-core'));
@@ -294,17 +280,17 @@ async function main(): Promise<void> {
     const components = world.listComponents();
     const detached = components.filter((component) => component.detached);
     const componentLines = detached.length === 0
-      ? 'Detached components: none'
-      : `Detached components:\n${detached.map((component) => {
+      ? '已分离组件：无'
+      : `已分离组件：\n${detached.map((component) => {
         const cause = component.separatedBy
-          ? ` via ${component.separatedBy.connectionId} @ tick ${component.separatedBy.tick}`
+          ? ` 经 ${component.separatedBy.connectionId} 于第 ${component.separatedBy.tick} 步分离`
           : '';
-        return `  ${component.id} <= ${component.sourceEntityId} parts [${formatIds(component.partIds)}]${cause}`;
+        return `  ${component.id} <= ${component.sourceEntityId} 部件 [${formatIds(component.partIds)}]${cause}`;
       }).join('\n')}`;
-    worldStatus.textContent = [`World entities: ${entities.length}`, ...entities.map((entity) => entityWorldLine(entity, world)), componentLines].join('\n');
+    worldStatus.textContent = [`世界物体：${entities.length}`, ...entities.map((entity) => entityWorldLine(entity, world)), componentLines].join('\n');
     structureStatus.textContent = detached.length === 0
-      ? 'Structure: all components attached'
-      : `Structure: ${detached.length} detached component${detached.length === 1 ? '' : 's'}; ownership retained by source Entity`;
+      ? '结构：所有组件均已连接'
+      : `结构：${detached.length} 个组件已分离；仍归原物体所有`;
 
     const environment = world.environment;
     const state = environment.state;
@@ -320,9 +306,9 @@ async function main(): Promise<void> {
         return `${component.sourceEntityId}/${partId}: S[${formatIds(regions.surfaceIds)}] V[${formatIds(regions.volumeIds)}]`;
       });
     });
-    environmentSummary.textContent = `Environment ${state.weather} · ${state.timeOfDay.toFixed(1)}h · daylight ${state.daylightFactor.toFixed(2)} (regions)`;
+    environmentSummary.textContent = `环境：${state.weather === 'rain' ? '雨' : '晴'} · ${state.timeOfDay.toFixed(1)} 时 · 日照 ${state.daylightFactor.toFixed(2)}（区域）`;
     environmentDetails.textContent = [
-      `Surfaces ${surfaces || 'none'} · volumes ${volumes || 'none'}`,
+      `地面 ${surfaces || '无'} · 水域 ${volumes || '无'}`,
       ...regionLines,
     ].join('\n');
   }
@@ -393,10 +379,10 @@ async function main(): Promise<void> {
     }
 
     updateWorldPanel();
-    sensorStatus.textContent = `Sensor platform ${sensorPlatformId}: active ${platformSensorRuntime?.readActiveSensorIds().length ?? 0}/${sensorPlatformEntity.blueprint.sensors?.length ?? 0} · observations ${platformObservations.length} · range ${platformRanges.length}${nearestPlatformRange === undefined ? '' : `, nearest ${nearestPlatformRange.toFixed(2)} m`} · Agent observations ${agentObservations.length} · contacts ${contacts.length}${strongestContact === undefined ? '' : `, peak ${strongestContact.toFixed(2)} N·s`}`;
+    sensorStatus.textContent = `传感器平台 ${sensorPlatformId}：启用 ${platformSensorRuntime?.readActiveSensorIds().length ?? 0}/${sensorPlatformEntity.blueprint.sensors?.length ?? 0} · 观测 ${platformObservations.length} · 距离回波 ${platformRanges.length}${nearestPlatformRange === undefined ? '' : `，最近 ${nearestPlatformRange.toFixed(2)} 米`} · Agent 观测 ${agentObservations.length} · 接触 ${contacts.length}${strongestContact === undefined ? '' : `，峰值 ${strongestContact.toFixed(2)} N·s`}`;
     if (brainSnapshot) {
       const { selfModel, worldModel, drives, decision, skillIntent } = brainSnapshot;
-      brainStatus.textContent = `Brain ${autonomous ? 'auto' : 'manual'} · goal ${decision?.goal.kind ?? 'none'} · skill ${skillIntent.skill} · avoid ${drives.avoid.toFixed(2)} · explore ${drives.explore.toFixed(2)} · self ${selfModel.stability.level} · feedback gap ${selfModel.feedbackGapRecent ? 'recent' : 'none'} · surfaces ${worldModel.ranges.length} · joints ${selfModel.joints.length}`;
+      brainStatus.textContent = `Agent 决策 ${autonomous ? '自动' : '手动'} · 目标 ${decision?.goal.kind ?? '无'} · 技能 ${skillIntent.skill} · 回避 ${drives.avoid.toFixed(2)} · 探索 ${drives.explore.toFixed(2)} · 自身稳定 ${selfModel.stability.level} · 反馈缺口 ${selfModel.feedbackGapRecent ? '近期有' : '无'} · 感知面 ${worldModel.ranges.length} · 关节 ${selfModel.joints.length}`;
       brainStatus.dataset.goal = decision?.goal.kind ?? '';
       brainStatus.dataset.skill = skillIntent.skill;
       brainStatus.dataset.avoid = String(drives.avoid);
@@ -407,7 +393,7 @@ async function main(): Promise<void> {
       const experience = skillSnapshot.lastExperience;
       const prediction = skillSnapshot.prediction;
       const parameters = skillSnapshot.parameters;
-      skillStatus.textContent = `Forward motor amplitude ${parameters.amplitude.toFixed(2)} · phase ${parameters.phaseOffset.toFixed(2)} rad · predicted ${prediction?.forwardProgress.toFixed(3) ?? '—'} m · observed ${experience?.observation.forwardProgress.toFixed(3) ?? '—'} m · error ${experience?.error.forwardProgress.toFixed(3) ?? '—'} m · adaptations ${skillSnapshot.adaptationCount} · last adjustment ${skillSnapshot.lastAdjustment?.reason ?? 'none'}`;
+      skillStatus.textContent = `前进输出 ${parameters.amplitude.toFixed(2)} · 相位 ${parameters.phaseOffset.toFixed(2)} rad · 预测 ${prediction?.forwardProgress.toFixed(3) ?? '—'} 米 · 实测 ${experience?.observation.forwardProgress.toFixed(3) ?? '—'} 米 · 误差 ${experience?.error.forwardProgress.toFixed(3) ?? '—'} 米 · 调整次数 ${skillSnapshot.adaptationCount} · 最近原因 ${skillSnapshot.lastAdjustment?.reason ?? '无'}`;
       skillStatus.dataset.amplitude = String(parameters.amplitude);
       skillStatus.dataset.phaseOffset = String(parameters.phaseOffset);
       skillStatus.dataset.prediction = prediction ? String(prediction.forwardProgress) : '';
@@ -419,7 +405,7 @@ async function main(): Promise<void> {
     renderer.render();
     const separatedConnections = Object.values(agentLive ? world.getDamageRuntime(agentId).state.connections : {})
       .filter((connection) => !connection.connected).length;
-    status.textContent = `Morphodyne Phase 8 · ${mode} · tick ${world.tick} · x ${root.x.toFixed(2)} · y ${root.y.toFixed(2)} · z ${root.z.toFixed(2)} · yaw ${yaw.toFixed(2)}`;
+    status.textContent = `Morphodyne · ${mode} · 第 ${world.tick} 步 · x ${root.x.toFixed(2)} · y ${root.y.toFixed(2)} · z ${root.z.toFixed(2)} · 朝向 ${yaw.toFixed(2)}`;
     status.dataset.tick = String(world.tick);
     status.dataset.coreX = String(root.x);
     status.dataset.coreY = String(root.y);
@@ -438,5 +424,5 @@ async function main(): Promise<void> {
 void main().catch((error: unknown) => {
   consoleLogSink.write({ level: 'error', source: 'bootstrap', message: String(error) });
   const app = document.querySelector('#app');
-  if (app) app.textContent = `World scene failed: ${String(error)}`;
+  if (app) app.textContent = `世界场景启动失败：${String(error)}`;
 });
