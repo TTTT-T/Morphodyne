@@ -1,471 +1,494 @@
-# NEXT TASK — v0.2 Phase 11：通用能量与功率（Energy & Power）
+# NEXT TASK — v0.2 Phase 12：结构产生能力验证（Capability Emergence Validation）
 
-Phase 10 已通过并合并。
+Phase 11 已通过并合并。
 
-当前 Morphodyne 已经具备：
+当前 Morphodyne 已具备：
 
+- 通用 Part / Material / Connection；
 - Joint Actuator；
 - Tension Actuator；
-- attachment point 产生真实力臂；
-- Rapier 物理运动；
-- Phase 9 Structural Load；
-- 真实受力导致 Damage / Separation。
+- attachment point / lever arm；
+- finite Energy / shared Power；
+- Rapier Physics；
+- Structural Load；
+- Damage / Separation；
+- Construction Runtime；
+- WorldRuntime。
 
-下一步不增加新能力类型，也不进入动物、Brain、生态或 UI 美化。
+Phase 12 不新增一套“能力系统”。
 
-Phase 11 只解决一个核心问题：
+本 Phase 的目标是验证 Morphodyne 最核心的命题：
 
-> **执行器不能再依赖一个不会减少的“availablePowerWatts”无限能源。**
+> **Entity 没有预定义能力；能力来自结构、执行器、能量、材料、环境与物理约束的组合。**
 
-本 Phase 建立最低限度、通用、可计算的 Energy / Power 资源层。
-
----
-
-## 1. 核心目标
-
-建立统一因果链：
-
-```text
-Finite Energy
-    ↓
-Power Budget
-    ↓
-ActuatorRuntime
-    ↓
-Joint / Tension physical output
-    ↓
-Rapier Physics
-    ↓
-Motion / Structural Load / Damage
-```
-
-Energy 只决定“执行器此刻最多能获得多少物理输出”。
-
-Energy 不决定：
-
-- 能不能走；
-- 能不能咬；
-- 能不能举起；
-- 能不能攻击；
-- 任何语义能力。
-
-最终结果仍由结构 + Actuator + Physics 决定。
+也就是说，本 Phase 主要是**集成验证 + 构造实验**，不是继续堆 Core 概念。
 
 ---
 
-# 2. 第一版 Energy 模型
+## 1. 最重要的禁止项
 
-把当前仅有：
+不要新增：
+
+- `canLift`
+- `canGrip`
+- `canMove`
+- `canWalk`
+- `canPush`
+- `canCarry`
+- `gripStrength`
+- `liftCapacity`
+- `movementSpeed`
+- `attackPower`
+- `machineType`
+- `animalType`
+- 任何等价的语义能力字段。
+
+不要在 Core 中创建：
 
 ```text
-availablePowerWatts
+Capability = { lift: ..., grip: ..., move: ... }
 ```
 
-的无限能源模型扩展为一个**有限 Energy Store / Supply**。
+作为世界真相。
 
-具体命名由实现者决定，但至少应表达：
+在 Morphodyne 中，“能力”应当是**观察到的结果**，不是 Entity 身上的属性。
 
-- capacity / initial energy：J；
-- remaining energy：J；
-- maximum usable power：W；
-- efficiency：0..1；
-- 当前 step 实际消耗；
-- 累积消耗。
+例如：
 
-建议：
+- 举起了 5 kg → 实验结果；
+- 夹住物体 3 秒 → 实验结果；
+- 推动目标 0.8 m → 实验结果。
+
+而不是：
 
 ```text
-EnergySourceSpec
-EnergyState / EnergyRuntime
+entity.liftCapacity = 5
+entity.canGrip = true
 ```
-
-或同等清晰设计。
-
-必须明确区分：
-
-- **Energy (J)**：还能做多少功；
-- **Power (W)**：每秒最多做多少功。
-
-禁止继续把这两个概念混为一个数字。
 
 ---
 
-# 3. 能量守恒规则
+# 2. Phase 12 的定位
 
-第一版只计算**机械正功**。
+不要新增重大 Physics 系统。
 
-对于 actuator：
-
-```text
-mechanicalPower = positive physical output × relevant physical velocity
-```
-
-Joint Actuator：
-
-- revolute：`torque × angular velocity`
-- prismatic：`force × linear joint velocity`
-
-Tension Actuator：
-
-- `tension × contraction speed`
-
-已经存在的 Phase 10 计算可以复用/整理。
-
-每个 fixed step：
+优先复用已有：
 
 ```text
-mechanicalWorkJ = positiveMechanicalPowerW × seconds
-energyDrawJ = mechanicalWorkJ / efficiency
+Construction
+→ Structure
+→ Actuator
+→ Energy
+→ Physics
+→ Load
+→ Damage
 ```
+
+如果实验暴露一个真正缺失的**通用物理接口**，允许做最小扩展。
+
+但每次扩展必须回答：
+
+1. 为什么现有通用规则无法表达？
+2. 这个抽象是否同时适用于机器和未来生物结构？
+3. 是否只是为了让某个实验通过？
+
+如果只是为了实验结果，禁止加入。
+
+---
+
+# 3. Capability 的定义方式
+
+Phase 12 中可以创建测试/工具层的：
+
+```text
+CapabilityProbe
+TaskMetric
+ExperimentMeasurement
+```
+
+或等价工具，用于测量物理结果。
+
+这些只能是：
+
+- test/tool measurement；
+- debug observation；
+- report evidence。
+
+不能成为 Core Entity 属性。
+
+例如允许：
+
+```text
+measuredLiftHeight
+payloadDisplacement
+holdDuration
+objectDropped
+energyConsumed
+connectionDamage
+```
+
+不允许：
+
+```text
+entity.capabilities.lift = true
+```
+
+---
+
+# 4. 必须完成的实验
+
+至少完成以下四组实验。
+
+所有关键实验必须尽量通过：
+
+```text
+WorldRuntime
++ ConstructionRuntime
++ real Rapier step
+```
+
+完成。
+
+禁止通过直接修改 transform / pose 得到结果。
+
+---
+
+## Experiment A — Structure Changes Lifting Capability
+
+构造两个使用相同：
+
+- 材料；
+- actuator；
+- maxOutput；
+- Energy；
+- payload；
+- 控制输入；
+
+的 lifting mechanism。
+
+只改变结构几何，例如：
+
+- lever arm 长度；
+- actuator attachment point；
+- 支点位置。
 
 要求：
 
-- 剩余 Energy 不能变成负数；
-- 没有足够 Energy 时必须减少本 step 的 actuator 输出；
-- Energy = 0 时不能继续产生主动机械正功；
-- maxPowerWatts 必须同时限制瞬时机械输出；
-- 多个 actuator 共享同一个 supply 时不能分别各拿一份完整功率预算。
+- 两个结构对同一 payload 产生明显不同的提升高度或提升能力；
+- 一个结构可以成功举起某个 payload，而另一个可能无法达到相同高度；
+- 差异必须来自真实 geometry / force / torque；
+- 不允许直接设置 lift force bonus。
+
+记录至少：
+
+- payload mass；
+- actuator output；
+- energy；
+- geometry difference；
+- 最大高度 / 位移；
+- energy consumed；
+- peak structural load。
 
 ---
 
-# 4. 关于静态力与负功
+## Experiment B — Structure + Friction Creates Gripping
 
-第一版采用**机械能模型**，不要假装已经模拟真实肌肉或电机损耗。
+构造一个通用两侧夹持机构。
 
-允许：
+建议使用：
 
-- actuator 在零速度时产生力但机械功为 0；
-- actuator 被外界反向驱动时不自动消耗正机械功。
+- Part；
+- revolute / prismatic Connection；
+- Tension 或 Joint Actuator；
+- 普通 contact / friction。
 
-但必须明确记录这是第一版理想化边界。
+夹持对象必须是一个独立 passive Entity。
 
-禁止在 Phase 11 顺便实现：
+要求：
 
-- 肌肉维持张力的代谢消耗；
-- 电机铜损；
-- 制动器发热；
-- regenerative braking；
-- ATP；
-- 电池化学；
-- 燃料燃烧；
-- 热系统。
+- jaw/夹持结构通过真实接触与摩擦夹住目标；
+- 改变结构几何、夹持方向或材料 friction 后，保持结果发生变化；
+- 不能使用 weld / teleport / parent / attach target 等作弊方式；
+- 不能把被夹物体加入夹具 Blueprint；
+- 不能新增 `gripped=true`。
 
-**负机械功默认不回充 Energy。**
+至少比较两个结构/材料方案：
 
-不要因为负功而凭空增加 remaining energy。
+- 一个能在指定时间窗口内保持目标；
+- 一个会滑落或无法稳定保持。
+
+“Grip”只由物理测量定义，例如：
+
+- 目标是否保持在空间区域内；
+- 目标下落距离；
+- contact 状态；
+- 持续时间。
 
 ---
 
-# 5. Efficiency
+## Experiment C — Construction Creates Capability
 
-Efficiency 只做最低限度的一阶模型。
+这是 Phase 12 最关键实验。
 
-约束：
+从一个**不具备目标物理行为的初始结构**开始。
 
-```text
-0 < efficiency <= 1
-```
+通过 `ConstructionRuntime` 在运行前或明确 construction boundary 中进行通用修改，例如：
 
-它表示：
+- 添加 Part；
+- 添加 Connection；
+- 添加 Actuator；
+- 改 attachment geometry；
+- 改材料 / mass。
 
-```text
-stored energy → usable mechanical work
-```
+要求：
+
+修改前：
+
+- 结构无法完成标准任务或表现明显较弱。
+
+修改后：
+
+- 同一个 Entity identity 在经过合法 reconstruction 后表现出新的/更强的物理行为。
 
 例如：
 
 ```text
-10 J mechanical work
-efficiency = 0.5
-=> draw 20 J from store
-```
-
-损失的能量第一版可以直接视为未建模耗散。
-
-不要创建 Heat Runtime。
-
----
-
-# 6. 多执行器共享资源
-
-这是 Phase 11 的关键验收之一。
-
-如果同一个 Energy Supply 同时驱动多个 actuator：
-
-```text
-total requested mechanical power > maxPowerWatts
-```
-
-则必须通过一个通用分配规则限制总输出。
-
-第一版可以使用 proportional scaling。
-
-要求：
-
-- 总机械输出不能超过 power ceiling；
-- actuator 数量增加不会凭空增加总可用功率；
-- 顺序不同不能明显改变总结果；
-- Joint 与 Tension 必须共享同一个预算。
-
-不要按 actuator 类型分别建立功率池。
-
----
-
-# 7. Runtime ownership
-
-Energy 必须有明确 Runtime state。
-
-当前 `SpawnOptions.energy` 可以调整，但不要让调用方每 tick 自己手动扣 Energy。
-
-World / Energy Runtime 应拥有：
-
-- remaining energy；
-- step budget；
-- consumption accounting。
-
-ActuatorRuntime 只提出/执行物理输出需求，不应自行伪造无限能源。
-
-如果需要新增：
-
-```text
-EnergyRuntime
-```
-
-是合理的。
-
-保持依赖方向清晰。
-
----
-
-# 8. 是否进入 Blueprint
-
-Phase 11 **不要求**现在就做电池 Part、燃料箱 Part 或能量网络。
-
-因此不要为了“结构化能源”把范围扩大成电气系统。
-
-第一版 Energy Supply 可以继续作为 WorldRuntime 的通用组成配置。
-
-但是架构必须允许未来把 Energy Supply 绑定到具体 Part / device，而不需要推翻 Actuator API。
-
-在文档中记录这个扩展边界即可。
-
----
-
-# 9. 必须完成的实验
-
-所有实验优先通过真实：
-
-```text
-WorldRuntime → Energy → ActuatorRuntime → Physics
-```
-
-路径。
-
-## Experiment A — Finite Energy Exhaustion
-
-同一个 actuated non-Agent machine：
-
-- 固定控制输入；
-- 固定结构；
-- 固定 actuator；
-- 给定有限 Energy。
-
-要求：
-
-- remaining energy 随实际正机械功下降；
-- Energy 耗尽后，主动运动明显停止或不再继续增加机械能；
-- 不允许通过 tick 数直接关闭 actuator；
-- 必须由真实 Energy accounting 导致。
-
----
-
-## Experiment B — Power Limit Changes Capability
-
-两个完全相同的结构和 Energy 总量。
-
-只改变：
-
-```text
-maxPowerWatts
-```
-
-要求：
-
-- 高功率版本在同一时间窗口内能产生更高机械输出/运动响应；
-- 低功率版本不是通过 speed multiplier 得到结果；
-- 差异必须来自 actuator output 被统一 power budget 限制。
-
----
-
-## Experiment C — Shared Power Budget
-
-一个结构同时运行至少两个 actuator。
-
-要求：
-
-- 单独运行 actuator A 时可以获得较高输出；
-- 单独运行 actuator B 时可以获得较高输出；
-- 同时运行 A+B 时，总机械功率仍受同一个上限约束；
-- 两个 actuator 不能各自获得完整 `maxPowerWatts`。
-
-至少包含一次 Joint + Tension 共享 supply 的验证。
-
----
-
-## Experiment D — Efficiency Changes Endurance
-
-两个相同结构：
-
-- 相同 stored Energy；
-- 相同 maxPower；
-- 相同控制；
-- 只改变 efficiency。
-
-要求：
-
-- 低效率版本为相同机械功消耗更多 stored Energy；
-- 更早耗尽；
-- 不允许 efficiency 直接修改速度、力或 torque；
-- 它只能通过 Energy consumption 改变长期能力。
-
----
-
-## Experiment E — No Free Recharge
-
-构造包含：
-
-- 外界推动 actuator；
-- negative mechanical work；
-- 或结构被拉长 / 反向驱动
-
-的情况。
-
-要求：
-
-- remaining energy 不增加；
-- 不出现负 consumption；
-- 不允许第一版系统自动再生能源。
-
----
-
-# 10. 防作弊要求
-
-禁止出现：
-
-- `if energyLow => moveSlower`
-- `if batteryEmpty => cannotWalk`
-- `if actuatorCount > 1 => ...`
-- `animalEnergy`
-- `machineEnergy`
-- `stamina`
-- `mana`
-- `fuelBonus`
-- 任何具体内容语义。
-
-Energy 只能通过：
-
-```text
-Energy → available mechanical output → Physics
-```
-
-改变结果。
-
-禁止 Energy Runtime：
-
-- 直接修改 Part pose；
-- 直接修改 velocity；
-- 直接制造 Damage；
-- 直接修改 Agent goal；
-- 直接设置 capability。
-
----
-
-# 11. 与 Phase 9 / 10 的关系
-
-必须保持：
-
-```text
-Energy
-→ Actuator
-→ Physics
-→ Structural Load
-→ Damage
-```
-
-不能变成：
-
-```text
-Energy
-→ Damage
+无 actuator 的结构
+→ 添加 Tension Actuator
+→ 获得实际提升/闭合/牵引结果
 ```
 
 或者：
 
 ```text
-Energy
-→ Movement Result
+错误力臂
+→ 调整 attachment point
+→ 同样 actuator 输出产生有效运动
 ```
 
-Phase 10 Tension Actuator 的 attachment geometry / point-force 规则不能被改变成预计算 torque。
+禁止 Construction Runtime 直接赋予能力。
 
-Phase 9 Structural Load 实验必须继续通过。
+必须是：
 
----
-
-# 12. Compatibility
-
-迁移当前所有主要 runtime / fixtures 到新的有限 Energy API。
-
-不要留下一个生产默认路径继续悄悄使用“无限 Energy”。
-
-如果为了测试需要无限 supply，只能：
-
-- 明确命名为 test/debug helper；
-- 不作为 WorldRuntime 默认值；
-- 不进入正式 Blueprint / Sandbox 默认配置。
-
-现有短时间 Agent / Machine 测试可以给予足够大的有限 Energy，避免无关行为变化。
+```text
+Construction changes structure
+→ Physics changes
+→ measured outcome changes
+```
 
 ---
 
-# 13. 可观测性
+## Experiment D — Damage Causes Functional Loss, Repair Restores It
 
-Energy 必须可查询。
+选择 Experiment A 或 B 中的一个机构。
 
-至少可以读取：
+先测量 intact 状态下的表现。
 
-- remainingEnergyJ；
-- consumedEnergyJ；
-- 本 step 使用的 mechanical power；
-- 当前 power limit。
+然后：
 
-God Sandbox 不要求重新设计 UI。
+- 通过真实 Structural Load / Impact 使一个关键 Connection 损坏或分离；
+- 再次运行同一标准任务；
+- 测量能力下降；
+- 使用现有合法 repair / reconstruction 路径恢复结构；
+- 再次运行；
+- 测量功能恢复。
 
-如果低成本，可以在现有 debug / inspection 中显示 Energy 状态；否则 API + tests 足够。
+要求：
 
-不要把 Phase 11 变成 UI Phase。
+完整链路：
+
+```text
+Damage
+→ structure changes
+→ physical performance falls
+```
+
+Repair：
+
+```text
+repair/reconstruction
+→ structure restored
+→ physical performance returns
+```
+
+禁止：
+
+```text
+if damaged => performance *= 0.5
+```
+
+禁止预制 injury debuff。
 
 ---
 
-# 14. Tests
+# 5. 额外 Generality Gate
 
-至少新增：
+至少证明一个结果不是某个 fixture 的特例。
 
-- Energy Core validation；
-- Energy Runtime unit tests；
-- finite energy integration；
-- power sharing integration；
-- efficiency integration；
-- no-recharge regression；
-- Joint + Tension shared budget。
+Phase 12 的实验集合中必须同时包含：
 
-并保持：
+- passive Entity；
+- actuated non-Agent Entity；
+- 至少一种通过 ConstructionRuntime 修改后的 Entity。
 
-- Phase 9 experiments；
-- Phase 10 experiments；
-- existing Joint Actuator tests；
-- Construction tests；
-- WorldRuntime tests。
+当前 quadruped Agent **不要求参与**。
+
+不要为了 Phase 12 回去调 Agent 步态。
+
+---
+
+# 6. 公平对照要求
+
+实验必须尽量使用 controlled comparison。
+
+比较结构 A / B 时，只改变声明中的目标变量。
+
+例如测试 lever geometry：
+
+保持：
+
+- material；
+- mass；
+- maxOutput；
+- energy；
+- control；
+- environment；
+
+相同。
+
+只改 geometry。
+
+测试 friction 时，只改 material friction。
+
+报告中明确列出：
+
+```text
+Controlled variables
+Changed variable
+Measured result
+```
+
+避免通过同时改多个参数制造“结构差异”。
+
+---
+
+# 7. 防作弊审查
+
+完成前主动扫描以下问题。
+
+禁止：
+
+### 结果分支
+
+```text
+if experimentA ...
+if isGripper ...
+if payloadMass > ...
+if blocked ...
+if damaged ...
+```
+
+来直接决定 outcome。
+
+### 测试识别
+
+Core / Physics / Simulation 中不能出现：
+
+- Phase12；
+- experiment 名称；
+- fixture id；
+- 特定 Blueprint 名称；
+
+用于改变物理逻辑。
+
+### 魔法约束
+
+禁止为了“夹住”：
+
+- 临时建立 rigid joint 到目标；
+- 修改 target parent；
+- freeze target；
+- 设置 kinematic；
+- teleport target；
+- 直接修改 pose / velocity。
+
+### 语义数值
+
+禁止：
+
+- lift bonus；
+- grip multiplier；
+- carry capacity；
+- locomotion multiplier；
+- damage debuff。
+
+所有差异必须能沿通用物理链解释。
+
+---
+
+# 8. 不要提前做的内容
+
+Phase 12 不做：
+
+- Phase 13 Sandbox 大改；
+- 动物 Blueprint；
+- 真实肌肉模型；
+- 牙齿 / 爪 / 攻击系统；
+- locomotion overhaul；
+- Brain 扩展；
+- Jev / LLM / RL；
+- ecology；
+- evolution；
+- energy network；
+- thermal；
+- fluid overhaul；
+- soft body。
+
+如果某个实验必须依赖这些才能完成，优先换一个更基础的实验，而不是扩 Scope。
+
+---
+
+# 9. 可复用 Fixtures
+
+可以新增少量通用 Blueprint / fixture，例如：
+
+- lever mechanism；
+- generic gripper；
+- generic actuator frame；
+- payload。
+
+名称可以描述结构，但不要成为 Core 类型。
+
+例如允许：
+
+```text
+createLeverFixture()
+createGripperFixture()
+```
+
+不允许 Core 出现：
+
+```text
+EntityKind.Gripper
+EntityKind.Lifter
+```
+
+---
+
+# 10. 测试要求
+
+新增 Phase 12 integration tests。
+
+至少覆盖：
+
+- lifting geometry comparison；
+- gripping/friction comparison；
+- Construction-created capability；
+- damage → loss → repair；
+- no semantic capability fields；
+- existing Phase 9 Structural Load regressions；
+- Phase 10 Tension regressions；
+- Phase 11 Energy regressions。
 
 完成前运行：
 
@@ -476,50 +499,101 @@ npm run build
 npm run check:boundaries
 ```
 
+如果新增 test helper / metric helper，它不能被生产 runtime 用来决定结果。
+
 ---
 
-# 15. 工作方式
+# 11. 报告要求
+
+创建：
+
+```text
+PHASE12_REPORT.md
+```
+
+报告必须包含：
+
+1. 四个实验的结构说明；
+2. controlled variables；
+3. changed variable；
+4. 定量结果；
+5. 能量消耗；
+6. 关键载荷；
+7. 是否损坏；
+8. capability 是如何从结果测量出来，而不是被声明出来；
+9. 已知近似；
+10. 明确的 anti-cheat review。
+
+报告中必须明确回答：
+
+> “如果删除所有 capability 语义标签，这些结果是否仍然成立？”
+
+正确答案应当是：成立，因为结果由结构和物理产生。
+
+---
+
+# 12. Architecture
+
+更新：
+
+```text
+docs/ARCHITECTURE_v0.2.md
+```
+
+增加“Capability is observed, not declared”原则。
+
+明确区分：
+
+- Structure = 世界真实结构；
+- Actuation = 物理输入；
+- Energy = 资源约束；
+- Capability = 在具体环境/任务条件下观察到的可实现结果。
+
+不要把 Capability 变成 Entity 固有 stat。
+
+---
+
+# 13. 工作方式
 
 这是一个完整 Phase。
 
-不要要求用户在实现步骤之间传话。
+不要要求用户中途传话。
 
 主代理负责：
 
-- architecture；
+- experiment design；
 - implementation；
-- integration；
-- tests；
-- self-review。
+- measurements；
+- regression；
+- anti-cheat review；
+- integration。
 
-可以使用 `gpt6-luna` 子代理完成边界清晰的工作。
+可使用 `gpt6-luna` 子代理处理边界清晰的测试/调查。
 
 不要建立专门 verifier 子代理。
 
-不要开始 Phase 12。
+不要开始 Phase 13。
 
 ---
 
-# 16. 输出
+# 14. 完成流程
 
 完成后：
 
-1. 更新 `docs/ARCHITECTURE_v0.2.md`；
-2. 创建 `PHASE11_REPORT.md`；
-3. 记录 Energy / Power / Efficiency 的单位和公式；
-4. 记录静态力与负功的第一版理想化边界；
-5. 记录五个实验的定量结果；
-6. 记录 Joint 与 Tension 如何共享功率；
-7. 跑完整测试；
-8. commit；
-9. push Phase 分支；
-10. 创建 PR 到 `main`；
-11. 停止在评审边界。
+1. 更新 Architecture；
+2. 创建 `PHASE12_REPORT.md`；
+3. 完成所有实验和量化；
+4. 做 anti-cheat scan；
+5. 跑完整测试；
+6. commit；
+7. push Phase 分支；
+8. 创建 PR 到 `main`；
+9. 停止等待评审。
 
 ---
 
-# Phase 11 核心验收
+# Phase 12 核心验收
 
-**执行器能做多少事，必须同时受“还剩多少能量”和“此刻能输出多少功率”限制。**
+**同样的基础规则下，仅改变结构、材料或安装方式，就能够改变 Entity 实际可实现的物理结果；Construction 能创造这种结果，Damage 能让它消失，Repair 能让它恢复。**
 
-如果 Energy 只是一个影响速度的数值 modifier，或者多个 actuator 能各自绕过共享预算，则 Phase 11 不通过。
+如果需要任何 `canX`、能力数值或结果特判才能让实验成立，则 Phase 12 不通过。
