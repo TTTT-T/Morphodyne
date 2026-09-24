@@ -99,6 +99,16 @@ export class ThreeSmokeRenderer {
     mesh.quaternion.set(pose.rotation.x, pose.rotation.y, pose.rotation.z, pose.rotation.w);
   }
 
+  removePart(handle: number): void {
+    const mesh = this.meshes.get(handle);
+    if (!mesh) return;
+    this.scene.remove(mesh);
+    mesh.geometry.dispose();
+    if (Array.isArray(mesh.material)) mesh.material.forEach((material) => material.dispose());
+    else mesh.material.dispose();
+    this.meshes.delete(handle);
+  }
+
   /** Display a sensor sample supplied by the simulation. Rendering never performs a query. */
   setDebugRay(id: string, origin: Vector3, end: Vector3, active: boolean): void {
     const previous = this.debugRays.get(id);

@@ -127,6 +127,86 @@ describe('Rapier primitive adapter', () => {
     expect(Number.isFinite(body.readPartPose('c').position.y)).toBe(true);
   });
 
+  it('reconstructs edited structure while preserving surviving world state and filtering active connections', async () => {
+    const physics = await RapierPhysicsAdapter.create();
+    const original = threePartEntity();
+    const body = physics.createBody(original);
+    const originalAHandle = body.partHandles.get('a')!;
+    const originalAPose = body.readPartPose('a');
+
+    physics.applyImpulse(originalAHandle, { x: 3, y: 0, z: -1 });
+    physics.applyTorqueImpulse(originalAHandle, { x: 0, y: 2, z: 0 });
+    const originalLinearVelocity = physics.readLinearVelocity(originalAHandle);
+    const originalAngularVelocity = physics.readPartAngularVelocity(body, 'a');
+
+    const newPart = {
+      id: 'new',
+      materialId: 'material',
+      geometry: { kind: 'box' as const, halfExtents: { x: 0.25, y: 0.25, z: 0.25 } },
+      pose: {
+        position: { x: 5, y: 4, z: -2 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+      },
+    };
+    const revised = {
+      ...original,
+      blueprint: {
+        ...original.blueprint,
+        parts: [original.blueprint.parts[0], original.blueprint.parts[2], newPart],
+        connections: [],
+      },
+    };
+
+    const replacement = physics.reconstructBody(body, revised, {
+      origin: { x: 20, y: 1, z: 3 },
+      activeConnectionIds: [],
+    });
+
+    const replacementAHandle = replacement.partHandles.get('a')!;
+    const replacementAPose = replacement.readPartPose('a');
+    expect(replacementAPose.position.x).toBeCloseTo(originalAPose.position.x);
+    expect(replacementAPose.position.y).toBeCloseTo(originalAPose.position.y);
+    expect(replacementAPose.position.z).toBeCloseTo(originalAPose.position.z);
+    expect(replacementAPose.rotation).toEqual(originalAPose.rotation);
+    expect(physics.readLinearVelocity(replacementAHandle).x).toBeCloseTo(originalLinearVelocity.x);
+    expect(physics.readLinearVelocity(replacementAHandle).y).toBeCloseTo(originalLinearVelocity.y);
+    expect(physics.readLinearVelocity(replacementAHandle).z).toBeCloseTo(originalLinearVelocity.z);
+    const replacementAngularVelocity = physics.readPartAngularVelocity(replacement, 'a');
+    expect(replacementAngularVelocity.x).toBeCloseTo(originalAngularVelocity.x);
+    expect(replacementAngularVelocity.y).toBeCloseTo(originalAngularVelocity.y);
+    expect(replacementAngularVelocity.z).toBeCloseTo(originalAngularVelocity.z);
+
+    const newPose = replacement.readPartPose('new');
+    expect(newPose.position.x).toBeCloseTo(25);
+    expect(newPose.position.y).toBeCloseTo(5);
+    expect(newPose.position.z).toBeCloseTo(1);
+    expect(replacement.connectionHandles.size).toBe(0);
+    expect(body.partHandles.size).toBe(0);
+    expect(() => physics.readPose(originalAHandle)).toThrow(`Unknown body handle: ${originalAHandle}`);
+
+    physics.removeBody(replacement);
+  });
+
+  it('keeps the old body intact when revised Blueprint validation fails', async () => {
+    const physics = await RapierPhysicsAdapter.create();
+    const body = physics.createBody(threePartEntity());
+    const poseBefore = body.readPartPose('a');
+    const invalid = {
+      ...threePartEntity(),
+      blueprint: {
+        ...threePartEntity().blueprint,
+        parts: threePartEntity().blueprint.parts.map((part) => part.id === 'a'
+          ? { ...part, geometry: { ...part.geometry, halfExtents: { x: 0, y: 0.5, z: 0.5 } } }
+          : part),
+      },
+    };
+
+    expect(() => physics.reconstructBody(body, invalid)).toThrow('Invalid geometry: a');
+    expect(body.partHandles.size).toBe(3);
+    expect(body.readPartPose('a').position).toEqual(poseBefore.position);
+    physics.removeBody(body);
+  });
+
   it('removes all Parts, joints, and backend references for a runtime body', async () => {
     const physics = await RapierPhysicsAdapter.create();
     const body = physics.createBody(threePartEntity());

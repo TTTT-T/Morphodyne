@@ -1,7 +1,7 @@
 import type { ControlSignal, EnergySource } from '../core/actuation';
-import type { DamageEvent } from '../core/damage';
+import { createDamageState, type DamageEvent, type StructuralDamageState } from '../core/damage';
 import type { EnvironmentSpec } from '../core/environment';
-import type { Entity, EntityId, Pose, Vector3 } from '../core/model';
+import { validateBlueprint, type Blueprint, type Entity, type EntityId, type Pose, type Vector3 } from '../core/model';
 import { deriveStructuralComponents } from '../core/structureOwnership';
 import type { PhysicsAdapter } from '../physics/PhysicsAdapter';
 import type { PhysicsBody } from '../physics/PhysicsBody';
@@ -51,9 +51,10 @@ interface ComponentRecord {
 }
 
 interface EntityRecord {
-  readonly entity: Entity;
-  readonly body: PhysicsBody;
-  readonly damage: StructuralDamageRuntime;
+  entity: Entity;
+  body: PhysicsBody;
+  damage: StructuralDamageRuntime;
+  readonly origin: Vector3;
   readonly energy?: EnergySource;
   actuator?: JointActuatorRuntime;
   control?: WorldControlSource;
@@ -94,7 +95,8 @@ export class WorldRuntime {
     const body = this.physics.createBody(entity, options.origin);
     const damage = new StructuralDamageRuntime(entity.blueprint, this.physics, body);
     const record: EntityRecord = {
-      entity, body, damage, ...(options.energy ? { energy: options.energy } : {}),
+      entity, body, damage, origin: options.origin ?? { x: 0, y: 0, z: 0 },
+      ...(options.energy ? { energy: options.energy } : {}),
       ...(options.control ? { control: options.control } : {}),
       ...(options.agent ? { agent: options.agent } : {}),
       ...(options.energy && (entity.blueprint.actuators?.length ?? 0) > 0
@@ -142,6 +144,77 @@ export class WorldRuntime {
       sensorIds: components.flatMap((entry) => entry.sensorIds),
       agentPresent: !!record.agent,
     };
+  }
+
+  /** A snapshot of the currently owned structure, excluding previously removed Parts. */
+  readBlueprint(id: EntityId): Blueprint {
+    const record = this.requireEntity(id);
+    const source = record.entity.blueprint;
+    const parts = source.parts.filter((part) => record.livePartIds.has(part.id));
+    const connections = source.connections.filter((connection) => record.livePartIds.has(connection.fromPartId)
+      && record.livePartIds.has(connection.toPartId));
+    const connectionIds = new Set(connections.map((connection) => connection.id));
+    return {
+      ...source, parts, connections,
+      actuators: source.actuators?.filter((actuator) => connectionIds.has(actuator.connectionId)),
+      sensors: source.sensors?.filter((sensor) => record.livePartIds.has(sensor.partId)),
+    };
+  }
+
+  /** Construction's explicit reconstruction boundary. Existing identity and intact damage survive edits. */
+  replaceStructure(id: EntityId, blueprint: Blueprint, resetDamageIds: readonly string[] = []): RuntimeEntityView {
+    const record = this.requireEntity(id);
+    const errors = validateBlueprint(blueprint);
+    if (blueprint.parts.length === 0) errors.push('A runtime Entity requires at least one Part');
+    if (errors.length) throw new Error(`Invalid Blueprint: ${errors.join('; ')}`);
+    const previous = record.damage.state;
+    const fresh = createDamageState(blueprint);
+    const reset = new Set(resetDamageIds);
+    const parts: Record<string, StructuralDamageState['parts'][string]> = { ...fresh.parts };
+    const connections: Record<string, StructuralDamageState['connections'][string]> = { ...fresh.connections };
+    const materialChanged = new Set<string>();
+    for (const part of blueprint.parts) {
+      const oldPart = record.entity.blueprint.parts.find((candidate) => candidate.id === part.id);
+      const oldMaterial = record.entity.blueprint.materials.find((material) => material.id === oldPart?.materialId);
+      const newMaterial = blueprint.materials.find((material) => material.id === part.materialId);
+      if (JSON.stringify(oldMaterial) !== JSON.stringify(newMaterial)) materialChanged.add(part.id);
+      if (!reset.has(part.id) && !materialChanged.has(part.id) && oldPart
+        && JSON.stringify(oldPart) === JSON.stringify(part) && previous.parts[part.id]) {
+        parts[part.id] = previous.parts[part.id];
+      }
+    }
+    for (const connection of blueprint.connections) {
+      const oldConnection = record.entity.blueprint.connections.find((candidate) => candidate.id === connection.id);
+      if (!reset.has(connection.id) && !materialChanged.has(connection.fromPartId)
+        && !materialChanged.has(connection.toPartId) && oldConnection && JSON.stringify(oldConnection) === JSON.stringify(connection)
+        && previous.connections[connection.id]) connections[connection.id] = previous.connections[connection.id];
+    }
+    const nextState: StructuralDamageState = { parts, connections };
+    const nextEntity = { id, blueprint };
+    const nextBody = this.physics.reconstructBody(record.body, nextEntity, {
+      origin: record.origin,
+      activeConnectionIds: blueprint.connections.filter((connection) => connections[connection.id].connected)
+        .map((connection) => connection.id),
+    });
+    const nextDamage = new StructuralDamageRuntime(blueprint, this.physics, nextBody, nextState);
+    record.entity = nextEntity;
+    record.body = nextBody;
+    record.damage = nextDamage;
+    record.livePartIds.clear();
+    for (const part of blueprint.parts) record.livePartIds.add(part.id);
+    for (const component of record.components.values()) component.sensor = undefined;
+    this.reconcileComponents(record);
+    this.rebuildActuator(record);
+    return this.inspectEntity(id)!;
+  }
+
+  /** An intentional physical impulse, routed through world ownership. */
+  applyImpact(componentId: EntityId, partId: string, impulse: Vector3): void {
+    const record = this.findComponentOwner(componentId);
+    if (!record.components.get(componentId)!.view.partIds.includes(partId)) {
+      throw new Error(`Part ${partId} is not owned by component ${componentId}`);
+    }
+    this.physics.applyImpulse(record.body.partHandles.get(partId)!, impulse);
   }
 
   listComponents(): readonly StructuralComponentView[] {
@@ -241,8 +314,8 @@ export class WorldRuntime {
         actuatorIds: group.actuatorIds.filter((actuatorId) => record.entity.blueprint.actuators
           ?.some((actuator) => actuator.id === actuatorId && connectionIds.includes(actuator.connectionId))),
         sensorIds: group.sensorIds,
-        detached: matched?.view.detached ?? previous.length > 0,
-        ...(matched?.view.separatedBy ? { separatedBy: matched.view.separatedBy }
+        detached: groups.length === 1 ? false : (matched?.view.detached ?? previous.length > 0),
+        ...(groups.length > 1 && matched?.view.separatedBy ? { separatedBy: matched.view.separatedBy }
           : cause ? { separatedBy: { connectionId: cause.connectionId, tick } } : {}),
       };
       const anchorPartId = matched?.anchorPartId ?? group.partIds[0];

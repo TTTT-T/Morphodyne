@@ -22,10 +22,30 @@ export interface RayHit {
   readonly point: Vector3;
 }
 
+/**
+ * Options for replacing a runtime body after an intentional Blueprint edit.
+ * Existing Parts keep their current world state; Parts without a surviving
+ * runtime counterpart use their revised Blueprint pose plus `origin`.
+ */
+export interface ReconstructBodyOptions {
+  readonly origin?: Vector3;
+  /** Connections omitted here remain absent from the reconstructed body. */
+  readonly activeConnectionIds?: readonly string[];
+}
+
 /** Backend boundary; a Blueprint instance becomes a PhysicsBody at runtime. */
 export interface PhysicsAdapter {
   createBox(spec: BoxSpec): BodyHandle;
   createBody(entity: Entity, origin?: Vector3): PhysicsBody;
+  /**
+   * Rebuild one body after an intentional structural edit while preserving
+   * surviving Part pose and velocity state.
+   */
+  reconstructBody(
+    oldBody: PhysicsBody,
+    revisedEntity: Entity,
+    options?: ReconstructBodyOptions,
+  ): PhysicsBody;
   /** Remove every Part, Connection, and backend object owned by one runtime body. */
   removeBody(body: PhysicsBody): void;
   /** Remove selected Parts and every Connection incident to them. */
