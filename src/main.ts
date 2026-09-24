@@ -14,6 +14,7 @@ import {
   createSensorPlatformBlueprint,
 } from './tools/worldFixtures';
 import { createActiveBlueprint, getActiveBodyAssemblies } from './tools/activeBody';
+import { environmentScene } from './tools/environmentScene';
 import { consoleLogSink } from './tools/logging';
 
 const IDENTITY_ROTATION = { x: 0, y: 0, z: 0, w: 1 } as const;
@@ -58,22 +59,30 @@ async function main(): Promise<void> {
   const skillStatus = document.createElement('div');
   skillStatus.className = 'skill-status';
   panel.append(skillStatus);
+  const environmentStatus = document.createElement('details');
+  environmentStatus.className = 'environment-status';
+  const environmentSummary = document.createElement('summary');
+  const environmentDetails = document.createElement('div');
+  environmentStatus.append(environmentSummary, environmentDetails);
+  panel.append(environmentStatus);
   const controls = document.createElement('div');
   controls.className = 'controls';
   panel.append(controls);
 
   const physics = await RapierPhysicsAdapter.create();
   const renderer = new ThreeSmokeRenderer(app);
-  const groundSpec = {
-    halfExtents: { x: 12, y: 0.1, z: 12 },
-    position: { x: 0, y: -0.1, z: 0 },
-    dynamic: false,
-  } as const;
-  const ground = physics.createBox(groundSpec);
-  renderer.addBox(ground, groundSpec.halfExtents, 0x343b46);
-  renderer.setPose(ground, physics.readPose(ground));
-
-  const world = new WorldRuntime(physics);
+  const world = new WorldRuntime(physics, environmentScene);
+  for (const surface of world.environment.listSurfaces()) {
+    const color = surface.id === 'surface-slippery' ? 0x54819a
+      : surface.id === 'surface-slope' ? 0x777c65 : 0x4a5057;
+    renderer.addEnvironmentSurface(surface.id, surface.halfExtents, {
+      position: surface.position,
+      rotation: surface.rotation ?? IDENTITY_ROTATION,
+    }, color);
+  }
+  for (const volume of world.environment.listVolumes()) {
+    renderer.addWaterVolume(volume.id, volume.min, volume.max);
+  }
   const passiveEntity: Entity = { id: 'entity-passive-object', blueprint: createPassiveObjectBlueprint() };
   const sensorTargetEntity: Entity = { id: 'entity-sensor-target', blueprint: createPassiveObjectBlueprint() };
   const machineEntity: Entity = { id: 'entity-actuated-machine', blueprint: createActuatedMachineBlueprint() };
@@ -224,6 +233,23 @@ async function main(): Promise<void> {
   resetButton.addEventListener('click', () => location.reload());
   controls.append(resetButton);
 
+  const rainButton = document.createElement('button');
+  rainButton.textContent = 'Rain';
+  rainButton.addEventListener('click', () => world.environment.setWeather('rain'));
+  controls.append(rainButton);
+  const clearButton = document.createElement('button');
+  clearButton.textContent = 'Clear';
+  clearButton.addEventListener('click', () => world.environment.setWeather('clear'));
+  controls.append(clearButton);
+  const nightButton = document.createElement('button');
+  nightButton.textContent = 'Night';
+  nightButton.addEventListener('click', () => world.environment.setTimeOfDay(0));
+  controls.append(nightButton);
+  const dayButton = document.createElement('button');
+  dayButton.textContent = 'Day';
+  dayButton.addEventListener('click', () => world.environment.setTimeOfDay(12));
+  controls.append(dayButton);
+
   let nextImpactEntityId = 1;
   const impactButton = document.createElement('button');
   impactButton.textContent = 'External impact';
@@ -259,13 +285,33 @@ async function main(): Promise<void> {
     structureStatus.textContent = detached.length === 0
       ? 'Structure: all components attached'
       : `Structure: ${detached.length} detached component${detached.length === 1 ? '' : 's'}; ownership retained by source Entity`;
+
+    const environment = world.environment;
+    const state = environment.state;
+    renderer.setDaylightFactor(state.daylightFactor);
+    const surfaces = environment.listSurfaces().map((surface) =>
+      `${surface.id} μ=${surface.effectiveFriction.toFixed(2)}`).join(' · ');
+    const volumes = environment.listVolumes().map((volume) =>
+      `${volume.id} ρ=${volume.density.toFixed(1)} drag=${volume.drag.toFixed(1)}`).join(' · ');
+    const regionLines = world.listComponents().flatMap((component) => {
+      if (!renderEntries.some((entry) => entry.entity.id === component.sourceEntityId)) return [];
+      return component.partIds.map((partId) => {
+        const regions = world.inspectPartEnvironment(component.id, partId);
+        return `${component.sourceEntityId}/${partId}: S[${formatIds(regions.surfaceIds)}] V[${formatIds(regions.volumeIds)}]`;
+      });
+    });
+    environmentSummary.textContent = `Environment ${state.weather} · ${state.timeOfDay.toFixed(1)}h · daylight ${state.daylightFactor.toFixed(2)} (regions)`;
+    environmentDetails.textContent = [
+      `Surfaces ${surfaces || 'none'} · volumes ${volumes || 'none'}`,
+      ...regionLines,
+    ].join('\n');
   }
 
   function readSensorObservations(componentIds: readonly string[]) {
     return componentIds.flatMap((componentId) => world.readObservations(componentId));
   }
 
-  consoleLogSink.write({ level: 'info', source: 'active-body', message: 'Phase 6.5 world scene ready' });
+  consoleLogSink.write({ level: 'info', source: 'world-scene', message: 'Phase 7 environment scene ready' });
 
   let previousTime: number | undefined;
   function frame(now: number): void {
@@ -352,7 +398,7 @@ async function main(): Promise<void> {
     renderer.render();
     const separatedConnections = Object.values(world.getDamageRuntime(agentId).state.connections)
       .filter((connection) => !connection.connected).length;
-    status.textContent = `Morphodyne Phase 6.5 · ${mode} · tick ${world.tick} · x ${root.x.toFixed(2)} · y ${root.y.toFixed(2)} · z ${root.z.toFixed(2)} · yaw ${yaw.toFixed(2)}`;
+    status.textContent = `Morphodyne Phase 7 · ${mode} · tick ${world.tick} · x ${root.x.toFixed(2)} · y ${root.y.toFixed(2)} · z ${root.z.toFixed(2)} · yaw ${yaw.toFixed(2)}`;
     status.dataset.tick = String(world.tick);
     status.dataset.coreX = String(root.x);
     status.dataset.coreY = String(root.y);
