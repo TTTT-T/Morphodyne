@@ -80,4 +80,5 @@ Windows validation was not required for this test-only Phase and was not run. No
 
 - Files: `src/tools/phase12Capability.test.ts`, `src/tools/phase12Grip.test.ts`, `docs/ARCHITECTURE_v0.2.md`, and this report.
 - Branch: `codex/phase-12-capability-emergence` → `main`.
-- Commit and PR: recorded after the PR is created.
+- Implementation and experiment report commit: `7636216` (`Phase 12: validate capability emergence through physical comparisons`).
+- Pull request: [#17 — Phase 12: validate capability emergence with controlled physics experiments](https://github.com/TTTT-T/Morphodyne/pull/17), targeting `main`.
