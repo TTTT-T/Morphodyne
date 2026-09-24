@@ -1,370 +1,471 @@
-# NEXT TASK — v0.2 Phase 10：通用拉力执行器（Tension Actuator）
+# NEXT TASK — v0.2 Phase 11：通用能量与功率（Energy & Power）
 
-Phase 9 已通过并合并。Morphodyne 现在已经能够把实际物理载荷（Impact / Force / Torque）送入统一 Structural Damage 路径。
+Phase 10 已通过并合并。
 
-Phase 10 不扩展 Brain，也不继续四足步态调参。
+当前 Morphodyne 已经具备：
 
-本 Phase 的目标是补上下一块通用机械基础：**一种不直接“命令关节产生扭矩”，而是在两个真实安装点之间产生拉力的执行器。**
+- Joint Actuator；
+- Tension Actuator；
+- attachment point 产生真实力臂；
+- Rapier 物理运动；
+- Phase 9 Structural Load；
+- 真实受力导致 Damage / Separation。
 
-它必须能够同时表达未来的：
+下一步不增加新能力类型，也不进入动物、Brain、生态或 UI 美化。
 
-- 肌肉；
-- 肌腱牵引；
-- 拉索；
-- 绞盘；
-- 简单线性拉力机构。
+Phase 11 只解决一个核心问题：
 
-这些名称都只是未来内容层解释；Core 中不要出现生物/机器语义类型。
+> **执行器不能再依赖一个不会减少的“availablePowerWatts”无限能源。**
+
+本 Phase 建立最低限度、通用、可计算的 Energy / Power 资源层。
 
 ---
 
-## Phase 10 核心目标
+## 1. 核心目标
 
-新增一种通用 Tension Actuator。
-
-因果链必须是：
+建立统一因果链：
 
 ```text
-ControlSignal
+Finite Energy
     ↓
-Tension Actuator
+Power Budget
     ↓
-两个真实 attachment points 之间产生等大反向拉力
+ActuatorRuntime
+    ↓
+Joint / Tension physical output
     ↓
 Rapier Physics
     ↓
-结构的几何、力臂、质量、关节约束决定运动
-    ↓
-Phase 9 Structural Load
-    ↓
-必要时产生 Damage / Separation
+Motion / Structural Load / Damage
 ```
 
-禁止直接把 Tension Actuator 转换成：
+Energy 只决定“执行器此刻最多能获得多少物理输出”。
 
-```text
-joint angle
-joint target
-magic torque
-ability result
-```
+Energy 不决定：
 
-它只能施加真实物理力。
+- 能不能走；
+- 能不能咬；
+- 能不能举起；
+- 能不能攻击；
+- 任何语义能力。
+
+最终结果仍由结构 + Actuator + Physics 决定。
 
 ---
 
-# 1. 通用数据模型
+# 2. 第一版 Energy 模型
 
-在现有 Actuator 抽象上扩展，而不是建立第二套平行控制系统。
-
-需要支持至少两类执行器：
-
-- 现有 Joint Actuator；
-- 新的 Tension Actuator。
-
-具体 TypeScript 设计由实现者结合现有代码决定，可以使用 discriminated union 或其他清晰的通用模型。
-
-Tension Actuator 至少需要表达：
-
-- actuator id；
-- 两个 Part；
-- 两个 Part 各自局部坐标系中的 attachment point；
-- 最大拉力（N）；
-- 可复用现有 response time 机制；
-- 必要的、纯物理的长度参数（如果实现确实需要）。
-
-不要加入：
-
-- muscleType；
-- tendonType；
-- biologicalStrength；
-- canPull；
-- limb；
-- jaw；
-- 或任何具体生物/机械语义。
-
-Blueprint 描述的是结构和执行器安装方式，不描述“能力”。
-
----
-
-# 2. 拉力的物理规则
-
-第一版 Tension Actuator 必须遵守：
-
-- 只能沿两个 attachment points 当前世界位置之间的连线施力；
-- 两端受到等大、方向相反的力；
-- 力作用在 attachment point，而不是默认作用于质心；
-- 因为作用点不同，自然产生力矩；
-- 最大输出由 `maxOutput`（N）限制；
-- 输出变化继续遵守现有 actuator response time；
-- physics 决定最终是否移动、旋转、卡死或损坏。
-
-第一版以“主动收缩产生张力”为主。
-
-不要模拟：
-
-- Hill muscle model；
-- 肌纤维生理；
-- 复杂弹性肌腱；
-- 神经激活；
-- 疲劳；
-- 热；
-- 液压细节。
-
-如果需要处理 slack / 零距离 / 极短距离等数值边界，使用明确且通用的物理规则并写测试。
-
----
-
-# 3. ControlSignal
-
-继续使用现有 ControlSignal 作为统一控制输入。
-
-不要为 Tension Actuator 建立新的控制协议。
-
-需要定义并文档化 ControlSignal 对 Tension Actuator 的含义。
-
-推荐语义：
+把当前仅有：
 
 ```text
-0      = 无主动张力
-1      = maxOutput
+availablePowerWatts
 ```
 
-由于当前 ControlSignal 支持 [-1, 1]，如何处理负值由实现者选择，但必须：
+的无限能源模型扩展为一个**有限 Energy Store / Supply**。
 
-- 行为明确；
-- 不允许负值变成“推力”；
-- 不偷偷把 tension actuator 变成双向线性马达；
-- 有测试覆盖。
+具体命名由实现者决定，但至少应表达：
 
-如果认为现有 ControlSignal 抽象需要小幅泛化，可以调整，但不要破坏统一控制路径。
+- capacity / initial energy：J；
+- remaining energy：J；
+- maximum usable power：W；
+- efficiency：0..1；
+- 当前 step 实际消耗；
+- 累积消耗。
+
+建议：
+
+```text
+EnergySourceSpec
+EnergyState / EnergyRuntime
+```
+
+或同等清晰设计。
+
+必须明确区分：
+
+- **Energy (J)**：还能做多少功；
+- **Power (W)**：每秒最多做多少功。
+
+禁止继续把这两个概念混为一个数字。
 
 ---
 
-# 4. PhysicsAdapter
+# 3. 能量守恒规则
 
-Rapier 细节必须继续封装在 PhysicsAdapter 内。
+第一版只计算**机械正功**。
 
-如果当前接口不足，可新增通用能力，例如：
+对于 actuator：
 
-- 对 Part 的某个世界/局部作用点施加力；
-- 查询 attachment point 世界位置；
-- 必要时查询作用点速度。
+```text
+mechanicalPower = positive physical output × relevant physical velocity
+```
 
-这些接口必须是通用 Physics 能力，不能命名成 muscle API。
+Joint Actuator：
 
-Three.js / UI 不参与物理计算。
+- revolute：`torque × angular velocity`
+- prismatic：`force × linear joint velocity`
+
+Tension Actuator：
+
+- `tension × contraction speed`
+
+已经存在的 Phase 10 计算可以复用/整理。
+
+每个 fixed step：
+
+```text
+mechanicalWorkJ = positiveMechanicalPowerW × seconds
+energyDrawJ = mechanicalWorkJ / efficiency
+```
+
+要求：
+
+- 剩余 Energy 不能变成负数；
+- 没有足够 Energy 时必须减少本 step 的 actuator 输出；
+- Energy = 0 时不能继续产生主动机械正功；
+- maxPowerWatts 必须同时限制瞬时机械输出；
+- 多个 actuator 共享同一个 supply 时不能分别各拿一份完整功率预算。
 
 ---
 
-# 5. Actuator Runtime
+# 4. 关于静态力与负功
 
-不要复制出：
+第一版采用**机械能模型**，不要假装已经模拟真实肌肉或电机损耗。
 
-```text
-JointActuatorRuntime
-MuscleRuntime
-CableRuntime
-WinchRuntime
-```
+允许：
 
-形成多套重复执行链。
+- actuator 在零速度时产生力但机械功为 0；
+- actuator 被外界反向驱动时不自动消耗正机械功。
 
-Phase 10 应借机整理成能够承载多种 actuator 的统一 Runtime。
+但必须明确记录这是第一版理想化边界。
 
-可以：
+禁止在 Phase 11 顺便实现：
 
-- 泛化现有 `JointActuatorRuntime`；
-- 重命名为更通用的 `ActuatorRuntime`；
-- 或使用内部 actuator handler。
+- 肌肉维持张力的代谢消耗；
+- 电机铜损；
+- 制动器发热；
+- regenerative braking；
+- ATP；
+- 电池化学；
+- 燃料燃烧；
+- 热系统。
 
-但固定步进中的控制路径仍然应该只有一条：
+**负机械功默认不回充 Energy。**
 
-```text
-ControlSignal → ActuatorRuntime → PhysicsAdapter
-```
-
-现有 Joint Actuator 行为必须保持。
+不要因为负功而凭空增加 remaining energy。
 
 ---
 
-# 6. 与 Phase 9 Structural Load 集成
+# 5. Efficiency
 
-这是 Phase 10 的关键要求。
+Efficiency 只做最低限度的一阶模型。
 
-Tension Actuator 施加的力必须是正常 Rapier 物理力。
-
-它导致的：
-
-- joint reaction；
-- connection force；
-- connection torque；
-- obstruction load；
-
-都应该自然被 Phase 9 的 load measurement 看见。
-
-禁止直接调用 Damage：
+约束：
 
 ```text
-TensionActuator → Damage
+0 < efficiency <= 1
 ```
 
-必须经过：
+它表示：
 
 ```text
-TensionActuator
+stored energy → usable mechanical work
+```
+
+例如：
+
+```text
+10 J mechanical work
+efficiency = 0.5
+=> draw 20 J from store
+```
+
+损失的能量第一版可以直接视为未建模耗散。
+
+不要创建 Heat Runtime。
+
+---
+
+# 6. 多执行器共享资源
+
+这是 Phase 11 的关键验收之一。
+
+如果同一个 Energy Supply 同时驱动多个 actuator：
+
+```text
+total requested mechanical power > maxPowerWatts
+```
+
+则必须通过一个通用分配规则限制总输出。
+
+第一版可以使用 proportional scaling。
+
+要求：
+
+- 总机械输出不能超过 power ceiling；
+- actuator 数量增加不会凭空增加总可用功率；
+- 顺序不同不能明显改变总结果；
+- Joint 与 Tension 必须共享同一个预算。
+
+不要按 actuator 类型分别建立功率池。
+
+---
+
+# 7. Runtime ownership
+
+Energy 必须有明确 Runtime state。
+
+当前 `SpawnOptions.energy` 可以调整，但不要让调用方每 tick 自己手动扣 Energy。
+
+World / Energy Runtime 应拥有：
+
+- remaining energy；
+- step budget；
+- consumption accounting。
+
+ActuatorRuntime 只提出/执行物理输出需求，不应自行伪造无限能源。
+
+如果需要新增：
+
+```text
+EnergyRuntime
+```
+
+是合理的。
+
+保持依赖方向清晰。
+
+---
+
+# 8. 是否进入 Blueprint
+
+Phase 11 **不要求**现在就做电池 Part、燃料箱 Part 或能量网络。
+
+因此不要为了“结构化能源”把范围扩大成电气系统。
+
+第一版 Energy Supply 可以继续作为 WorldRuntime 的通用组成配置。
+
+但是架构必须允许未来把 Energy Supply 绑定到具体 Part / device，而不需要推翻 Actuator API。
+
+在文档中记录这个扩展边界即可。
+
+---
+
+# 9. 必须完成的实验
+
+所有实验优先通过真实：
+
+```text
+WorldRuntime → Energy → ActuatorRuntime → Physics
+```
+
+路径。
+
+## Experiment A — Finite Energy Exhaustion
+
+同一个 actuated non-Agent machine：
+
+- 固定控制输入；
+- 固定结构；
+- 固定 actuator；
+- 给定有限 Energy。
+
+要求：
+
+- remaining energy 随实际正机械功下降；
+- Energy 耗尽后，主动运动明显停止或不再继续增加机械能；
+- 不允许通过 tick 数直接关闭 actuator；
+- 必须由真实 Energy accounting 导致。
+
+---
+
+## Experiment B — Power Limit Changes Capability
+
+两个完全相同的结构和 Energy 总量。
+
+只改变：
+
+```text
+maxPowerWatts
+```
+
+要求：
+
+- 高功率版本在同一时间窗口内能产生更高机械输出/运动响应；
+- 低功率版本不是通过 speed multiplier 得到结果；
+- 差异必须来自 actuator output 被统一 power budget 限制。
+
+---
+
+## Experiment C — Shared Power Budget
+
+一个结构同时运行至少两个 actuator。
+
+要求：
+
+- 单独运行 actuator A 时可以获得较高输出；
+- 单独运行 actuator B 时可以获得较高输出；
+- 同时运行 A+B 时，总机械功率仍受同一个上限约束；
+- 两个 actuator 不能各自获得完整 `maxPowerWatts`。
+
+至少包含一次 Joint + Tension 共享 supply 的验证。
+
+---
+
+## Experiment D — Efficiency Changes Endurance
+
+两个相同结构：
+
+- 相同 stored Energy；
+- 相同 maxPower；
+- 相同控制；
+- 只改变 efficiency。
+
+要求：
+
+- 低效率版本为相同机械功消耗更多 stored Energy；
+- 更早耗尽；
+- 不允许 efficiency 直接修改速度、力或 torque；
+- 它只能通过 Energy consumption 改变长期能力。
+
+---
+
+## Experiment E — No Free Recharge
+
+构造包含：
+
+- 外界推动 actuator；
+- negative mechanical work；
+- 或结构被拉长 / 反向驱动
+
+的情况。
+
+要求：
+
+- remaining energy 不增加；
+- 不出现负 consumption；
+- 不允许第一版系统自动再生能源。
+
+---
+
+# 10. 防作弊要求
+
+禁止出现：
+
+- `if energyLow => moveSlower`
+- `if batteryEmpty => cannotWalk`
+- `if actuatorCount > 1 => ...`
+- `animalEnergy`
+- `machineEnergy`
+- `stamina`
+- `mana`
+- `fuelBonus`
+- 任何具体内容语义。
+
+Energy 只能通过：
+
+```text
+Energy → available mechanical output → Physics
+```
+
+改变结果。
+
+禁止 Energy Runtime：
+
+- 直接修改 Part pose；
+- 直接修改 velocity；
+- 直接制造 Damage；
+- 直接修改 Agent goal；
+- 直接设置 capability。
+
+---
+
+# 11. 与 Phase 9 / 10 的关系
+
+必须保持：
+
+```text
+Energy
+→ Actuator
 → Physics
 → Structural Load
 → Damage
 ```
 
----
+不能变成：
 
-# 7. 必须完成的物理实验
+```text
+Energy
+→ Damage
+```
 
-至少实现以下四个实验，优先使用 WorldRuntime 的真实固定步进路径。
+或者：
 
-## Experiment A — Lever Arm Creates Rotation
+```text
+Energy
+→ Movement Result
+```
 
-构造一个可转动结构。
+Phase 10 Tension Actuator 的 attachment geometry / point-force 规则不能被改变成预计算 torque。
 
-使用相同：
-
-- Part；
-- Joint；
-- Tension force；
-- 控制信号。
-
-只改变 Tension Actuator attachment point 相对旋转轴的距离。
-
-要求：
-
-- 两个结构收到相同最大拉力；
-- 更大的物理力臂产生明显不同的旋转响应；
-- 不允许通过 actuator 参数直接写 torque 差异；
-- 差异必须由 attachment geometry × force 自然产生。
-
-这是 Phase 10 最核心实验。
+Phase 9 Structural Load 实验必须继续通过。
 
 ---
 
-## Experiment B — Geometry Changes Capability
+# 12. Compatibility
 
-构造两个外观/部件基本相同的结构。
+迁移当前所有主要 runtime / fixtures 到新的有限 Energy API。
 
-只改变 Tension Actuator 的安装位置或拉力方向。
+不要留下一个生产默认路径继续悄悄使用“无限 Energy”。
 
-要求：
+如果为了测试需要无限 supply，只能：
 
-- 一个结构能有效驱动目标运动；
-- 另一个因为几何位置差异产生明显更弱或不同的运动；
-- 两者使用相同 actuator maxOutput；
-- 不存在 `canMove` / `efficiencyBonus` 等语义参数。
+- 明确命名为 test/debug helper；
+- 不作为 WorldRuntime 默认值；
+- 不进入正式 Blueprint / Sandbox 默认配置。
 
-目标是证明：
-
-**执行器相同，结构不同，能力就不同。**
+现有短时间 Agent / Machine 测试可以给予足够大的有限 Energy，避免无关行为变化。
 
 ---
 
-## Experiment C — Blocked Pull Produces Structural Load
+# 13. 可观测性
 
-让 Tension Actuator 拉动一个结构：
+Energy 必须可查询。
 
-- 第一种情况可自由运动；
-- 第二种情况被真实物理障碍阻挡。
+至少可以读取：
 
-要求：
+- remainingEnergyJ；
+- consumedEnergyJ；
+- 本 step 使用的 mechanical power；
+- 当前 power limit。
 
-- blocked case 产生明显结构载荷；
-- 输出足够大或持续足够久时，可以通过 Phase 9 Damage 路径损坏/断裂；
-- 自由结构不应因为同样控制输入直接获得相同 Damage；
-- 禁止 `if blocked => damage`。
+God Sandbox 不要求重新设计 UI。
 
----
+如果低成本，可以在现有 debug / inspection 中显示 Energy 状态；否则 API + tests 足够。
 
-## Experiment D — Tension Does Not Push
-
-验证：
-
-- 0 输出不产生主动张力；
-- 正输出产生拉力；
-- 负输入无论采用 clamp / reject / other explicit rule，都不能产生反向推力；
-- 极短 attachment 距离不会产生 NaN / Infinity / 爆炸力。
+不要把 Phase 11 变成 UI Phase。
 
 ---
 
-# 8. Energy 处理
-
-Phase 11 才会正式扩展 Energy / Power 系统。
-
-所以 Phase 10 不要顺便实现：
-
-- 电池；
-- 燃料；
-- ATP；
-- 热；
-- 完整效率模型；
-- 疲劳。
-
-但现有 `EnergySource.availablePowerWatts` 不能被无意绕过。
-
-如果为了支持 Tension Actuator 必须泛化当前 actuator power accounting，可以做最小必要调整，并在报告中说明第一版机械功率如何估算。
-
-不要让这个子问题膨胀成 Phase 11。
-
----
-
-# 9. Construction / Blueprint
-
-Tension Actuator 必须成为 Blueprint / Construction Runtime 可表达的通用结构组件。
-
-至少保证：
-
-- Blueprint 可以声明；
-- validateBlueprint 可以验证；
-- runtime spawn 可以创建；
-- serialize / parse 不丢失；
-- Construction Runtime 的通用增删 actuator 路径不会假设 actuator 一定绑定 Connection。
-
-不要求 Phase 10 大改 God Sandbox UI。
-
-如果现有 UI 因 actuator 类型假设发生回归，只做必要兼容。
-
----
-
-# 10. 架构边界
-
-继续保持：
-
-- Core 不依赖 Rapier；
-- Core 不依赖 Three.js；
-- PhysicsAdapter 隔离物理后端；
-- Actuator 只提供物理输入，不提供结果；
-- Physics 决定运动；
-- Damage 读取物理载荷；
-- Agent 不是 World / Actuator 的必要组成。
-
-禁止具体内容污染 Core。
-
-不要为四足 Agent 或未来动物写特例。
-
----
-
-# 11. 测试与回归
+# 14. Tests
 
 至少新增：
 
-- Tension Actuator Core validation；
-- PhysicsAdapter point-force tests；
-- WorldRuntime integration experiments；
-- Construction / Blueprint compatibility tests（如相关类型发生变化）。
+- Energy Core validation；
+- Energy Runtime unit tests；
+- finite energy integration；
+- power sharing integration；
+- efficiency integration；
+- no-recharge regression；
+- Joint + Tension shared budget。
 
-并确保：
+并保持：
 
-- Phase 9 Structural Load 实验继续通过；
-- 现有 Joint Actuator 行为继续通过；
-- passive Entity / non-Agent machine 仍然是一等公民。
+- Phase 9 experiments；
+- Phase 10 experiments；
+- existing Joint Actuator tests；
+- Construction tests；
+- WorldRuntime tests。
 
 完成前运行：
 
@@ -377,52 +478,48 @@ npm run check:boundaries
 
 ---
 
-# 12. 工作方式
+# 15. 工作方式
 
 这是一个完整 Phase。
 
-不要要求用户在多个小步骤之间传话。
+不要要求用户在实现步骤之间传话。
 
 主代理负责：
 
-- 调研；
-- 架构决定；
-- 实现；
-- 测试；
-- 集成；
-- 自审。
+- architecture；
+- implementation；
+- integration；
+- tests；
+- self-review。
 
-可以使用 `gpt6-luna` 子代理完成边界清晰的调查或实现任务，但主代理必须亲自负责整体架构和最终整合。
+可以使用 `gpt6-luna` 子代理完成边界清晰的工作。
 
 不要建立专门 verifier 子代理。
 
-如果没有真正的架构阻塞，直接完成整个 Phase。
+不要开始 Phase 12。
 
 ---
 
-# 13. Phase 10 输出
+# 16. 输出
 
 完成后：
 
 1. 更新 `docs/ARCHITECTURE_v0.2.md`；
-2. 创建 `PHASE10_REPORT.md`；
-3. 记录 Tension Actuator 的物理定义和单位；
-4. 记录 attachment point 的坐标语义；
-5. 记录负 ControlSignal 的明确规则；
-6. 记录四个实验的定量结果；
-7. 记录 Phase 9 Structural Load 如何观测 Tension Actuator 造成的载荷；
-8. 跑完整测试；
-9. commit；
-10. push Phase 分支；
-11. 创建 PR 到 `main`；
-12. 停止在评审边界。
-
-不要开始 Phase 11。
+2. 创建 `PHASE11_REPORT.md`；
+3. 记录 Energy / Power / Efficiency 的单位和公式；
+4. 记录静态力与负功的第一版理想化边界；
+5. 记录五个实验的定量结果；
+6. 记录 Joint 与 Tension 如何共享功率；
+7. 跑完整测试；
+8. commit；
+9. push Phase 分支；
+10. 创建 PR 到 `main`；
+11. 停止在评审边界。
 
 ---
 
-# Phase 10 核心验收
+# Phase 11 核心验收
 
-**同样大小的拉力，仅仅因为安装位置、力臂和结构不同，就必须产生不同的物理能力。**
+**执行器能做多少事，必须同时受“还剩多少能量”和“此刻能输出多少功率”限制。**
 
-如果 Tension Actuator 最终只是换一种方式直接给 joint 写 torque，则 Phase 10 不通过。
+如果 Energy 只是一个影响速度的数值 modifier，或者多个 actuator 能各自绕过共享预算，则 Phase 11 不通过。
