@@ -36,7 +36,7 @@ See:
 
 ## Status
 
-**Pre-alpha / Phase 6 skill adaptation complete. Phase 6.5 Generality & World Foundation next.**
+**Pre-alpha / Phase 6.5 Generality & World Foundation complete. Phase 7 World & Environment next.**
 
 The project currently prioritizes universal world/structure rules, causal correctness, modularity, and testability over visual fidelity or content volume. The active quadruped is a validation Blueprint, not the architectural center of the project.
 
