@@ -59,3 +59,10 @@ Windows and browser UI acceptance were not run; Phase 14's required physics expe
 Rapier contact-force events provide magnitudes, not local stress, pressure, contact area, or exact energy deposition. The rising-edge impulse approximation can undercount repeated impacts without a complete contact release. The sustained overload integral is not fatigue or crack propagation. Connection reaction remains v0.2's momentum-balance estimate, not a solver-exact joint force. `fractured` does not shatter a visual mesh. No Windows run was performed; Mac is the primary development and validation environment for this Phase.
 
 Architecture deviations: none. The remaining modeling risks are the low-fidelity contact transient and multi-joint reaction estimates described above.
+
+## Review handoff
+
+- Implementation commit: `fad2663` (`feat: add universal external Part contact damage`).
+- Phase branch: `codex/phase-14-contact-material-damage` targeting `main`.
+- Pull request: [#19 — Phase 14: universal external contact material damage](https://github.com/TTTT-T/Morphodyne/pull/19).
+- This report update records the review link; Phase 15 has not started.
