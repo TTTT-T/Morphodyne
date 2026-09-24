@@ -1,6 +1,6 @@
 import './GodSandboxPanel.css';
 
-import { createControlSignal, type JointActuator } from '../core/actuation';
+import { createControlSignal, type StructuralActuator } from '../core/actuation';
 import type {
   Blueprint,
   Connection,
@@ -76,7 +76,7 @@ export interface GodSandboxConstruction {
   updatePart(entityId: string, part: Part): void;
   addConnection(entityId: string, connection: Connection): void;
   removeConnection(entityId: string, connectionId: string): void;
-  addActuator(entityId: string, actuator: JointActuator): void;
+  addActuator(entityId: string, actuator: StructuralActuator): void;
   removeActuator(entityId: string, actuatorId: string): void;
   addSensor(entityId: string, sensor: Sensor): void;
   removeSensor(entityId: string, sensorId: string): void;

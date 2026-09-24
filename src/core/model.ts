@@ -1,4 +1,4 @@
-import type { JointActuator } from './actuation';
+import type { StructuralActuator } from './actuation';
 
 /** Stable identity is supplied by the caller; the core never invents semantic identities. */
 export type EntityId = string;
@@ -141,7 +141,7 @@ export interface Blueprint {
   readonly parts: readonly Part[];
   readonly connections: readonly Connection[];
   /** Optional actuator declarations; omitted for passive structures. */
-  readonly actuators?: readonly JointActuator[];
+  readonly actuators?: readonly StructuralActuator[];
   /** Optional sensors mounted on Parts. */
   readonly sensors?: readonly Sensor[];
 }
@@ -376,10 +376,23 @@ export function validateBlueprint(blueprint: Blueprint): string[] {
       && (!Number.isFinite(actuator.responseTimeSeconds) || actuator.responseTimeSeconds <= 0)) {
       errors.push(`Invalid actuator responseTimeSeconds: ${actuator.id}`);
     }
-    const connection = connections.get(actuator.connectionId);
-    if (!connection) errors.push(`Unknown actuator connection: ${actuator.id}`);
-    else if (connection.kind !== 'revolute' && connection.kind !== 'prismatic') {
-      errors.push(`Actuator requires a revolute or prismatic connection: ${actuator.id}`);
+    if (actuator.kind === 'tension') {
+      if (!partIds.has(actuator.fromPartId) || !partIds.has(actuator.toPartId)) {
+        errors.push(`Unknown tension actuator endpoint: ${actuator.id}`);
+      }
+      if (actuator.fromPartId === actuator.toPartId) errors.push(`Self tension actuator: ${actuator.id}`);
+      if (!actuator.fromAttachment || !actuator.toAttachment
+        || !isFiniteVector(actuator.fromAttachment) || !isFiniteVector(actuator.toAttachment)) {
+        errors.push(`Invalid tension actuator attachment: ${actuator.id}`);
+      }
+    } else if (actuator.kind === undefined || actuator.kind === 'joint') {
+      const connection = connections.get(actuator.connectionId);
+      if (!connection) errors.push(`Unknown actuator connection: ${actuator.id}`);
+      else if (connection.kind !== 'revolute' && connection.kind !== 'prismatic') {
+        errors.push(`Actuator requires a revolute or prismatic connection: ${actuator.id}`);
+      }
+    } else {
+      errors.push(`Invalid actuator kind: ${actuator.id}`);
     }
   }
 

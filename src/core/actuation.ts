@@ -1,3 +1,5 @@
+import type { Vector3 } from './model';
+
 /**
  * A normalized command addressed to one actuator.
  *
@@ -23,8 +25,22 @@ export interface Actuator {
  * Connection. Revolute output is torque (N·m); prismatic output is force (N).
  */
 export interface JointActuator extends Actuator {
+  /** Omitted for compatibility with existing Joint Actuator Blueprints. */
+  readonly kind?: 'joint';
   readonly connectionId: string;
 }
+
+/** Equal and opposite tensile forces between two Part-local points. */
+export interface TensionActuator extends Actuator {
+  readonly kind: 'tension';
+  readonly fromPartId: string;
+  readonly toPartId: string;
+  /** Metres in the corresponding Part's local frame. maxOutput is newtons. */
+  readonly fromAttachment: Vector3;
+  readonly toAttachment: Vector3;
+}
+
+export type StructuralActuator = JointActuator | TensionActuator;
 
 /** Minimal energy observation shared by different energy mechanisms. */
 export interface EnergySource {

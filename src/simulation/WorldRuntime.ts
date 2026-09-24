@@ -7,7 +7,7 @@ import type { PhysicsAdapter } from '../physics/PhysicsAdapter';
 import type { PhysicsBody } from '../physics/PhysicsBody';
 import { FixedStepSimulation } from './FixedStepSimulation';
 import { EnvironmentRuntime, type PartEnvironmentView, type PhysicalPartView } from './EnvironmentRuntime';
-import { JointActuatorRuntime } from './JointActuatorRuntime';
+import { ActuatorRuntime } from './ActuatorRuntime';
 import { SensorRuntime, type SensorObservation } from './SensorRuntime';
 import { StructuralDamageRuntime } from './StructuralDamageRuntime';
 
@@ -56,7 +56,7 @@ interface EntityRecord {
   damage: StructuralDamageRuntime;
   readonly origin: Vector3;
   readonly energy?: EnergySource;
-  actuator?: JointActuatorRuntime;
+  actuator?: ActuatorRuntime;
   control?: WorldControlSource;
   agent?: { readonly control: WorldControlSource };
   readonly components: Map<EntityId, ComponentRecord>;
@@ -100,7 +100,7 @@ export class WorldRuntime {
       ...(options.control ? { control: options.control } : {}),
       ...(options.agent ? { agent: options.agent } : {}),
       ...(options.energy && (entity.blueprint.actuators?.length ?? 0) > 0
-        ? { actuator: new JointActuatorRuntime(entity.blueprint, this.physics, body, options.energy) } : {}),
+        ? { actuator: new ActuatorRuntime(entity.blueprint, this.physics, body, options.energy) } : {}),
       components: new Map(), livePartIds: new Set(entity.blueprint.parts.map((part) => part.id)),
     };
     this.entities.set(entity.id, record);
@@ -156,7 +156,9 @@ export class WorldRuntime {
     const connectionIds = new Set(connections.map((connection) => connection.id));
     return {
       ...source, parts, connections,
-      actuators: source.actuators?.filter((actuator) => connectionIds.has(actuator.connectionId)),
+      actuators: source.actuators?.filter((actuator) => actuator.kind === 'tension'
+        ? record.livePartIds.has(actuator.fromPartId) && record.livePartIds.has(actuator.toPartId)
+        : connectionIds.has(actuator.connectionId)),
       sensors: source.sensors?.filter((sensor) => record.livePartIds.has(sensor.partId)),
     };
   }
@@ -312,7 +314,9 @@ export class WorldRuntime {
         id, sourceEntityId: record.entity.id, partIds: group.partIds,
         connectionIds,
         actuatorIds: group.actuatorIds.filter((actuatorId) => record.entity.blueprint.actuators
-          ?.some((actuator) => actuator.id === actuatorId && connectionIds.includes(actuator.connectionId))),
+          ?.some((actuator) => actuator.id === actuatorId && (actuator.kind === 'tension'
+            ? record.livePartIds.has(actuator.fromPartId) && record.livePartIds.has(actuator.toPartId)
+            : connectionIds.includes(actuator.connectionId)))),
         sensorIds: group.sensorIds,
         detached: groups.length === 1 ? false : (matched?.view.detached ?? previous.length > 0),
         ...(groups.length > 1 && matched?.view.separatedBy ? { separatedBy: matched.view.separatedBy }
@@ -333,7 +337,7 @@ export class WorldRuntime {
     const active = new Set([...record.components.values()].flatMap((component) => component.view.actuatorIds));
     const blueprint = { ...record.entity.blueprint,
       actuators: record.entity.blueprint.actuators?.filter((actuator) => active.has(actuator.id)) };
-    record.actuator = new JointActuatorRuntime(blueprint, this.physics, record.body, record.energy);
+    record.actuator = new ActuatorRuntime(blueprint, this.physics, record.body, record.energy);
   }
 
   private newFragmentId(sourceId: EntityId): EntityId {

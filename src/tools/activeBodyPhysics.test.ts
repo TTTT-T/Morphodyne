@@ -39,10 +39,13 @@ async function trial(intent: ControlIntent, options: { powered?: boolean; impact
       physics.applyImpulse(projectile, { x: 0, y: 0, z: 1.5 });
     }
     const joints = new Map<string, JointFeedback>();
-    for (const actuator of blueprint.actuators ?? []) joints.set(actuator.id, {
+    for (const actuator of blueprint.actuators ?? []) {
+      if (actuator.kind === 'tension') continue;
+      joints.set(actuator.id, {
       angle: physics.readJointPosition(body, actuator.connectionId),
       angularVelocity: physics.readJointVelocity(body, actuator.connectionId),
-    });
+      });
+    }
     const signals = controller.update(1 / 60, body.readPartPose('part-core'), tick < 120 ? { forward: 0, turn: 0 } : intent, { joints });
     const drive = tick < 120 ? { forward: 0, turn: 0 } : intent;
     const driveSignals = getActiveBodyAssemblies().map((assembly) => {

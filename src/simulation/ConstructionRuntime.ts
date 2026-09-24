@@ -1,10 +1,10 @@
-import type { JointActuator } from '../core/actuation';
+import type { StructuralActuator } from '../core/actuation';
 import { validateBlueprint, type Blueprint, type Connection, type Entity, type EntityId, type Part, type Sensor, type Vector3 } from '../core/model';
 import { WorldRuntime, type SpawnOptions } from './WorldRuntime';
 
 /** Intentional Blueprint edits. World owns identities; the physics adapter executes reconstruction. */
 export class ConstructionRuntime {
-  private readonly detached = new Map<EntityId, Map<string, { connection: Connection; actuators: readonly JointActuator[] }>>();
+  private readonly detached = new Map<EntityId, Map<string, { connection: Connection; actuators: readonly StructuralActuator[] }>>();
 
   constructor(private readonly world: WorldRuntime) {}
 
@@ -69,7 +69,9 @@ export class ConstructionRuntime {
     const ids = new Set(connections.map((connection) => connection.id));
     this.world.replaceStructure(entityId, {
       ...source, parts: source.parts.filter((part) => part.id !== partId), connections,
-      actuators: source.actuators?.filter((actuator) => ids.has(actuator.connectionId)),
+      actuators: source.actuators?.filter((actuator) => actuator.kind === 'tension'
+        ? actuator.fromPartId !== partId && actuator.toPartId !== partId
+        : ids.has(actuator.connectionId)),
       sensors: source.sensors?.filter((sensor) => sensor.partId !== partId),
     });
     this.pruneDetached(entityId, this.world.readBlueprint(entityId));
@@ -91,7 +93,8 @@ export class ConstructionRuntime {
     if (!source.connections.some((connection) => connection.id === connectionId)) throw new Error(`Unknown Connection: ${connectionId}`);
     this.world.replaceStructure(entityId, {
       ...source, connections: source.connections.filter((connection) => connection.id !== connectionId),
-      actuators: source.actuators?.filter((actuator) => actuator.connectionId !== connectionId),
+      actuators: source.actuators?.filter((actuator) => actuator.kind === 'tension'
+        || actuator.connectionId !== connectionId),
     });
   }
 
@@ -103,7 +106,9 @@ export class ConstructionRuntime {
     this.removeConnection(entityId, connectionId);
     let saved = this.detached.get(entityId);
     if (!saved) { saved = new Map(); this.detached.set(entityId, saved); }
-    saved.set(connectionId, { connection, actuators: source.actuators?.filter((actuator) => actuator.connectionId === connectionId) ?? [] });
+    saved.set(connectionId, { connection,
+      actuators: source.actuators?.filter((actuator) => actuator.kind !== 'tension' && actuator.connectionId === connectionId) ?? [],
+    });
   }
 
   reattach(entityId: EntityId, connectionId: string): void {
@@ -126,7 +131,7 @@ export class ConstructionRuntime {
     return [...(this.detached.get(entityId)?.values() ?? [])].map((entry) => entry.connection);
   }
 
-  addActuator(entityId: EntityId, actuator: JointActuator): void {
+  addActuator(entityId: EntityId, actuator: StructuralActuator): void {
     this.edit(entityId, (source) => ({ ...source, actuators: [...(source.actuators ?? []), actuator] }));
   }
 

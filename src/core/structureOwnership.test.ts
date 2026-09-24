@@ -91,6 +91,10 @@ describe('structural ownership graph', () => {
         { id: 'motor-root', connectionId: 'root-leaf', maxOutput: 1 },
         { id: 'motor-separated', connectionId: 'branch-leaf', maxOutput: 1 },
         { id: 'motor-detached', connectionId: 'detached-machine', maxOutput: 1 },
+        { id: 'tension-root', kind: 'tension', fromPartId: 'root', toPartId: 'leaf',
+          fromAttachment: { x: 0, y: 0, z: 0 }, toAttachment: { x: 0.1, y: 0, z: 0 }, maxOutput: 1 },
+        { id: 'tension-split', kind: 'tension', fromPartId: 'root', toPartId: 'machine',
+          fromAttachment: { x: 0, y: 0, z: 0 }, toAttachment: { x: 0.1, y: 0, z: 0 }, maxOutput: 1 },
       ],
     };
     const state = damageState(blueprint, new Set(['branch-leaf', 'detached-machine', 'detached-free']));
@@ -100,7 +104,7 @@ describe('structural ownership graph', () => {
         partIds: ['root', 'branch', 'leaf'],
         connectionIds: ['root-leaf', 'root-branch'],
         sensorIds: ['root-sensor', 'leaf-sensor'],
-        actuatorIds: ['motor-root'],
+        actuatorIds: ['motor-root', 'tension-root', 'tension-split'],
       },
       {
         partIds: ['detached'],

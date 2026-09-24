@@ -60,6 +60,12 @@ export interface PhysicsAdapter {
   applyImpulse(handle: BodyHandle, impulse: Vector3): void;
   /** Apply force for the next physics step only. */
   applyForce(handle: BodyHandle, force: Vector3): void;
+  /** Apply a force (N) at a world-space point (m) for the next physics step only. */
+  applyForceAtPoint(handle: BodyHandle, force: Vector3, worldPoint: Vector3): void;
+  /** Convert a Part-local point (m) to its current world position (m). */
+  readWorldPoint(handle: BodyHandle, localPoint: Vector3): Vector3;
+  /** Current velocity (m/s) at a Part-local point. */
+  readPointVelocity(handle: BodyHandle, localPoint: Vector3): Vector3;
   /** Update friction on a static world box created with createBox. */
   setBoxFriction(handle: BodyHandle, friction: number): void;
   applyTorqueImpulse(handle: BodyHandle, torque: Vector3): void;

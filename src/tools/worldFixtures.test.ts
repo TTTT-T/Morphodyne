@@ -39,6 +39,7 @@ describe('Phase 6.5 world fixtures', () => {
     const blueprint = createActuatedMachineBlueprint();
     const body = physics.createBody({ id: 'machine', blueprint }, { x: 0, y: 2, z: 0 });
     const actuator = blueprint.actuators![0];
+    if (actuator.kind === 'tension') throw new Error('Expected a joint actuator fixture');
     const runtime = new JointActuatorRuntime(blueprint, physics, body, { availablePowerWatts: 100 });
     const before = physics.readJointPosition(body, actuator.connectionId);
 
