@@ -40,4 +40,4 @@ Intentional reattachment in v0.1 reconnects components belonging to the same sou
 
 Mac browser and Rapier validation completed. Windows validation was not run; the Roadmap treats it as optional for this Phase. No post-v0.1 animal/ecology work began.
 
-Implementation commit: `6005367` (`Phase 8: construction runtime, sandbox controls, and core validation`). Pull request: pending creation, targeting `main`.
+Implementation commit: `6005367` (`Phase 8: construction runtime, sandbox controls, and core validation`). Initial report commit: `576ff82`. Pull request: [#12 — Phase 8: Construction, God Sandbox & Core Validation](https://github.com/TTTT-T/Morphodyne/pull/12), targeting `main`. Stop at review; do not begin post-v0.1 work.
