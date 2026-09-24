@@ -1,22 +1,104 @@
-# NEXT TASK — v0.1 Complete
+# NEXT TASK — v0.1.1 中文化与易用性整理
 
-Morphodyne v0.1 foundation has been implemented, reviewed, and accepted through Phase 8.
+目标：让不熟悉编程的项目所有者打开 Morphodyne 后，能直接看懂并操作当前 God Sandbox。
 
-Current state:
+这不是 UI 重做，也不是视觉美化阶段。不要引入 React、UI 框架、设计系统或复杂动画。
 
-- WorldRuntime and Entity lifecycle: complete for v0.1.
-- World Environment: complete for v0.1.
-- Construction Runtime: complete for v0.1.
-- God Sandbox shell: complete for v0.1.
-- Five core causal validation experiments: passed.
-- Phase 8 report: `PHASE8_REPORT.md`.
+## 核心要求
 
-## Do not automatically continue
+1. **默认界面全部中文化**
+   - 所有按钮、标题、状态、错误提示、说明文字改为中文。
+   - 核心术语可以保留英文括注，方便以后对照文档：
+     - 部件（Part）
+     - 连接（Connection）
+     - 执行器（Actuator）
+     - 传感器（Sensor）
+     - 蓝图（Blueprint）
 
-There is currently **no active implementation task**.
+2. **按用户任务重新分组**
+   默认界面优先呈现：
+   - 世界
+   - 创建
+   - 编辑当前物体
+   - 作用 / 破坏与修复
+   - 时间控制
+   - 环境
+   - 高级 / 调试
 
-Do not begin post-v0.1 animal, ecology, social, evolution, soft-body/FEM, LLM/Jev, or large-world work merely because this file is read.
+3. **常用功能前置**
+   至少让以下操作容易找到：
+   - 生成箱子 / 被动物体
+   - 生成简单机械结构
+   - 生成传感器平台
+   - 生成 Agent
+   - 添加部件
+   - 删除部件
+   - 连接两个部件
+   - 拆开连接
+   - 重新连接
+   - 添加执行器
+   - 添加传感器
+   - 施加冲击
+   - 修复
+   - 暂停
+   - 单步
+   - 调整时间速度
+   - 晴 / 雨
+   - 白天 / 夜晚
 
-The next task should begin only after a new post-v0.1 direction is deliberately chosen and this file is updated.
+4. **高级信息默认折叠**
+   以下内容不要占据主要界面：
+   - Blueprint JSON
+   - Damage 内部状态
+   - Sensor 原始数据
+   - Entity / Part / Connection 内部 ID
+   - 完整 Inspection JSON
+   - 结构调试详情
 
-Until then, preserve the accepted v0.1 architecture and generality guardrails in `AGENTS.md`.
+   放入“高级 / 调试”折叠区，需要时再展开。
+
+5. **给用户短说明**
+   对容易误解的操作增加很短的中文说明，例如：
+   - “添加部件：给当前物体增加一个新的物理部件。”
+   - “连接：把两个部件用物理连接固定在一起。”
+   - “执行器：让连接主动产生力或扭矩。”
+   - “施加冲击：给选中的部件一个瞬间外力，用于测试损伤和结构变化。”
+
+   说明要短，不写教程长文。
+
+## 约束
+
+- 不改变 World / Construction / Physics / Agent 架构。
+- 不新增游戏逻辑。
+- 不增加新的 Brain / Skill / Learning 功能。
+- 不做视觉美化工程。
+- 不做移动端适配。
+- 不做主题系统。
+- 不做复杂拖拽编辑器。
+- 不修改 v0.1 已通过的核心因果验证逻辑。
+
+## 验收标准
+
+打开浏览器后，一个不熟悉代码的人应该能在不看源码的情况下完成：
+
+1. 看懂当前世界里有哪些对象。
+2. 生成一个物体。
+3. 选择一个物体。
+4. 给它添加一个 Part。
+5. 把两个 Part 连接起来。
+6. 拆开并重新连接。
+7. 对 Part 施加冲击。
+8. 修复结构。
+9. 暂停并单步运行。
+10. 切换晴/雨和白天/夜晚。
+11. 知道 Blueprint JSON 和内部状态属于“高级调试”，而不是日常操作。
+
+完成后：
+
+- 跑必要测试；
+- `npm run typecheck`；
+- `npm run build`；
+- Mac 浏览器 smoke；
+- 写简短 `V0_1_1_USABILITY_REPORT.md`；
+- push 一个分支并创建一个 PR 到 `main`；
+- 停止，不开始 v0.2。
