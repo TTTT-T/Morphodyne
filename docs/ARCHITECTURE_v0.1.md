@@ -530,6 +530,14 @@ Initial environment scope:
 
 Environmental effects must reach entities through physics, sensors, or material interactions rather than arbitrary game debuffs.
 
+### 12.1 Phase 7 runtime ownership and first approximations
+
+WorldRuntime owns an EnvironmentRuntime alongside Entity lifecycle. EnvironmentRuntime owns Surface colliders, Water Volumes, directional force fields, weather, and time of day. A Surface supplies a contact condition to Rapier; each Part retains its own material friction, and Rapier resolves their contact. Rain changes a Surface collider's friction condition, including on a slope. It does not mutate a Part material or an Agent ability. A slope is a rotated physical collider; gravity and contact decide the result.
+
+Water acts on every live Part intersecting its axis-aligned bounds. The first model estimates submerged volume from the Part's shape volume and the overlap of its unrotated bounding box with the Water Volume. It applies buoyancy (`fluid density × gravity × submerged volume`) and velocity-dependent drag through PhysicsAdapter forces for the next fixed step. The approximation omits orientation-sensitive displacement, currents, waves, and fluid dynamics. Directional fields likewise apply physical forces to Parts without inspecting Entity or Agent composition. Rapier's existing global gravity remains the baseline gravity field of the world; additional fields are explicit world-owned regions.
+
+Time of day has a world-owned daylight factor used by rendering. The current range sensor does not depend on light, so night does not change its observations. If weather later affects sensing, it must change SensorRuntime's physical signal/noise path before Observation and Perception; it must not directly alter Brain state. Environment region inspection is debug truth, never Agent input.
+
 ---
 
 ## 13. State, Event, Memory

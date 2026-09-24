@@ -1,10 +1,12 @@
-import type { Entity, Pose, Vector3 } from '../core/model';
+import type { Entity, Pose, Quaternion, Vector3 } from '../core/model';
 import type { PhysicsBody } from './PhysicsBody';
 
 export interface BoxSpec {
   readonly halfExtents: Vector3;
   readonly position: Vector3;
   readonly dynamic: boolean;
+  readonly rotation?: Quaternion;
+  readonly friction?: number;
 }
 
 export type BodyHandle = number;
@@ -29,6 +31,10 @@ export interface PhysicsAdapter {
   /** Remove selected Parts and every Connection incident to them. */
   removeParts(body: PhysicsBody, partIds: readonly string[]): void;
   applyImpulse(handle: BodyHandle, impulse: Vector3): void;
+  /** Apply force for the next physics step only. */
+  applyForce(handle: BodyHandle, force: Vector3): void;
+  /** Update friction on a static world box created with createBox. */
+  setBoxFriction(handle: BodyHandle, friction: number): void;
   applyTorqueImpulse(handle: BodyHandle, torque: Vector3): void;
   /**
    * Read the physical impulse magnitude accumulated for one Part during the
@@ -71,4 +77,5 @@ export interface PhysicsAdapter {
   readJointPosition(body: PhysicsBody, connectionId: string): number;
   step(seconds: number): void;
   readPose(handle: BodyHandle): Pose;
+  readLinearVelocity(handle: BodyHandle): Vector3;
 }

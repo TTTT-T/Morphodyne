@@ -9,6 +9,8 @@ export class ThreeSmokeRenderer {
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true });
   private readonly meshes = new Map<number, THREE.Mesh>();
   private readonly debugRays = new Map<string, THREE.Line>();
+  private readonly environmentMeshes = new Map<string, THREE.Mesh>();
+  private daylight = -1;
 
   constructor(container: HTMLElement) {
     this.scene.background = new THREE.Color(0x15191f);
@@ -30,6 +32,38 @@ export class ThreeSmokeRenderer {
       new THREE.BoxGeometry(halfExtents.x * 2, halfExtents.y * 2, halfExtents.z * 2),
       color,
     );
+  }
+
+  /** Render an Environment-owned surface as presentation of its current spec. */
+  addEnvironmentSurface(id: string, halfExtents: Vector3, pose: Pose, color: number): void {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(halfExtents.x * 2, halfExtents.y * 2, halfExtents.z * 2),
+      new THREE.MeshStandardMaterial({ color, roughness: 0.9 }),
+    );
+    mesh.position.set(pose.position.x, pose.position.y, pose.position.z);
+    mesh.quaternion.set(pose.rotation.x, pose.rotation.y, pose.rotation.z, pose.rotation.w);
+    this.addEnvironmentMesh(id, mesh);
+  }
+
+  /** Water is a translucent visual volume; physics behavior comes from EnvironmentRuntime. */
+  addWaterVolume(id: string, min: Vector3, max: Vector3): void {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(max.x - min.x, max.y - min.y, max.z - min.z),
+      new THREE.MeshStandardMaterial({ color: 0x299ac2, transparent: true, opacity: 0.3, roughness: 0.35 }),
+    );
+    mesh.position.set((min.x + max.x) / 2, (min.y + max.y) / 2, (min.z + max.z) / 2);
+    this.addEnvironmentMesh(id, mesh);
+  }
+
+  setDaylightFactor(value: number): void {
+    const factor = Math.max(0, Math.min(1, value));
+    if (Math.abs(factor - this.daylight) < 1e-4) return;
+    this.daylight = factor;
+    this.scene.background = new THREE.Color(0x15191f).lerp(new THREE.Color(0x9ac8e5), factor * 0.72);
+    this.scene.traverse((object) => {
+      if (object instanceof THREE.HemisphereLight) object.intensity = 0.3 + factor * 2.2;
+      if (object instanceof THREE.DirectionalLight) object.intensity = 0.15 + factor * 1.85;
+    });
   }
 
   /** Add the presentation shape for one runtime Part. Physics owns its pose. */
@@ -118,6 +152,19 @@ export class ThreeSmokeRenderer {
     }
     const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color }));
     this.meshes.set(handle, mesh);
+    this.scene.add(mesh);
+  }
+
+  private addEnvironmentMesh(id: string, mesh: THREE.Mesh): void {
+    const previous = this.environmentMeshes.get(id);
+    if (previous) {
+      this.scene.remove(previous);
+      previous.geometry.dispose();
+      const material = previous.material;
+      if (Array.isArray(material)) material.forEach((entry) => entry.dispose());
+      else material.dispose();
+    }
+    this.environmentMeshes.set(id, mesh);
     this.scene.add(mesh);
   }
 }

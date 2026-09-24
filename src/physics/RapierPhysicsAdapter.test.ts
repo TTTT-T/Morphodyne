@@ -32,6 +32,71 @@ function threePartEntity() {
 }
 
 describe('Rapier primitive adapter', () => {
+  it('rotates world boxes, updates static world friction, and scopes applied force to one step', async () => {
+    const physics = await RapierPhysicsAdapter.create();
+    const slope = physics.createBox({
+      halfExtents: { x: 4, y: 0.1, z: 4 },
+      position: { x: 0, y: 0, z: 0 },
+      dynamic: false,
+      rotation: { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 },
+      friction: 0.2,
+    });
+    expect(physics.readPose(slope).rotation.z).toBeCloseTo(Math.SQRT1_2);
+    physics.setBoxFriction(slope, 0.8);
+
+    const body = physics.createBox({
+      halfExtents: { x: 0.5, y: 0.5, z: 0.5 },
+      position: { x: 0, y: 5, z: 0 },
+      dynamic: true,
+    });
+    physics.applyForce(body, { x: 8, y: 0, z: 0 });
+    physics.step(0.1);
+    const afterForce = physics.readLinearVelocity(body);
+    expect(afterForce.x).toBeGreaterThan(0);
+    physics.step(0.1);
+    expect(physics.readLinearVelocity(body).x).toBeCloseTo(afterForce.x, 5);
+
+    expect(() => physics.setBoxFriction(body, 0.4)).toThrow('Unknown static world box handle');
+    expect(() => physics.setBoxFriction(slope, Number.NaN)).toThrow('non-negative and finite');
+  });
+
+  it('rejects invalid optional world box rotation and friction', async () => {
+    const physics = await RapierPhysicsAdapter.create();
+    const base = { halfExtents: { x: 1, y: 1, z: 1 }, position: { x: 0, y: 0, z: 0 }, dynamic: false };
+    expect(() => physics.createBox({ ...base, rotation: { x: 0, y: 0, z: 0, w: 0 } })).toThrow('non-zero');
+    expect(() => physics.createBox({ ...base, friction: -1 })).toThrow('non-negative and finite');
+  });
+
+  it('changes sliding contact on the same rotated surface when friction changes', async () => {
+    const slideDistance = async (friction: number) => {
+      const physics = await RapierPhysicsAdapter.create();
+      const angle = Math.PI / 6;
+      const halfAngle = angle / 2;
+      const normal = { x: -Math.sin(angle), y: Math.cos(angle), z: 0 };
+      physics.createBox({
+        halfExtents: { x: 10, y: 0.1, z: 4 },
+        position: { x: 0, y: 0, z: 0 },
+        dynamic: false,
+        rotation: { x: 0, y: 0, z: Math.sin(halfAngle), w: Math.cos(halfAngle) },
+        friction,
+      });
+      const body = physics.createBox({
+        halfExtents: { x: 0.2, y: 0.2, z: 0.2 },
+        position: { x: normal.x * 0.32, y: normal.y * 0.32, z: 0 },
+        dynamic: true,
+        friction: 0.5,
+      });
+      const start = physics.readPose(body).position;
+      for (let tick = 0; tick < 90; tick += 1) physics.step(1 / 60);
+      const end = physics.readPose(body).position;
+      return Math.hypot(end.x - start.x, end.y - start.y);
+    };
+
+    const lowFrictionSlide = await slideDistance(0.05);
+    const highFrictionSlide = await slideDistance(1.5);
+    expect(lowFrictionSlide).toBeGreaterThan(highFrictionSlide + 0.5);
+  });
+
   it('lets gravity and collision decide the smoke body pose', async () => {
     const physics = await RapierPhysicsAdapter.create();
     physics.createBox({ halfExtents: { x: 8, y: 0.1, z: 8 }, position: { x: 0, y: -0.1, z: 0 }, dynamic: false });
