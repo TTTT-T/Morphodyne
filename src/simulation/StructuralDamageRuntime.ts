@@ -13,8 +13,9 @@ export class StructuralDamageRuntime {
     private readonly blueprint: Blueprint,
     private readonly physics: PhysicsAdapter,
     private readonly body: PhysicsBody,
+    initialState?: StructuralDamageState,
   ) {
-    this.current = createDamageState(blueprint);
+    this.current = initialState ?? createDamageState(blueprint);
     for (const part of blueprint.parts) {
       this.incidentConnections.set(part.id, blueprint.connections
         .filter((connection) => connection.fromPartId === part.id || connection.toPartId === part.id)

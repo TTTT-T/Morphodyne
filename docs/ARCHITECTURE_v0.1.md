@@ -155,10 +155,18 @@ This separation is deliberate so a future renderer or physics backend can be rep
 ### 3.2 World, Construction, and Physics ownership
 
 - **WorldRuntime** owns stable Entity IDs, spawn/remove, fixed-step scheduling, runtime composition, and the current ownership of connected structural components. A detached component receives its own world ID and separation provenance while retaining its source Entity and existing physical Parts.
-- **Construction Runtime** (Phase 8A) will own intentional structure edits: attach, detach, add/remove/modify Part or Connection, validation, and the corresponding reconstruction path. It will request lifecycle changes through WorldRuntime rather than treating UI or scene code as structural truth.
+- **Construction Runtime** owns intentional structure edits: attach, detach, add/remove/modify Part or Connection, validation, and the corresponding reconstruction path. It requests lifecycle changes through WorldRuntime rather than treating UI or scene code as structural truth.
 - **PhysicsAdapter** creates, steps, and removes the physical representation of current structure. Rapier handles remain backend references, never Entity or component identity. Physical separation removes a joint; WorldRuntime then projects the resulting Core connection state into component ownership.
 
-This Phase 6.5 component model does not synthesize a new Blueprint or reset physical velocity when a connection fails. Reattachment will require an explicit Construction operation and a defined physics update path.
+Physical separation does not synthesize a new Blueprint or reset physical velocity. Phase 8 Construction operations can now reconstruct a revised Blueprint and reattach an intentionally detached component through the physics update path.
+
+### 3.3 Phase 8 construction and inspection boundary
+
+ConstructionRuntime validates a revised Blueprint before asking WorldRuntime to replace structure. WorldRuntime retains the Entity ID, reconciles connected-component IDs from surviving Parts, preserves unchanged structural damage, and rebuilds Sensor and Actuator runtimes against the new physical body. RapierPhysicsAdapter reconstructs the body: surviving Parts keep their current world pose and velocities, new Parts use Blueprint-local pose plus the Entity's spawn origin, and connections already separated by damage remain physically absent. Creating or repairing a Connection is an explicit construction operation. A rejected Blueprint leaves the existing structure running.
+
+Intentional detach removes the declared Connection and remembers it for reattachment during the current construction session. Removing a Connection also removes its dependent Actuator declaration. Detached components remain owned by their source Entity and retain inspectable component IDs until a later edit merges them; they are not silently converted into new Entity types. Saving a Blueprint persists declarative structure, not transient physics or damage state.
+
+The God Sandbox reads World and Construction views and submits edits through those APIs. Rendering mirrors current Part handles after reconstruction. Browser controls do not own Entity lifecycle, connection state, or physical outcomes.
 
 ---
 

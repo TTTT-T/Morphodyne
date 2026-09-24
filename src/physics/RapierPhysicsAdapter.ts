@@ -1,7 +1,14 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { Connection, Entity, Material, Part, Pose, Quaternion, Vector3 } from '../core/model';
 import { validateBlueprint } from '../core/model';
-import type { BodyHandle, BoxSpec, PhysicalContact, PhysicsAdapter, RayHit } from './PhysicsAdapter';
+import type {
+  BodyHandle,
+  BoxSpec,
+  PhysicalContact,
+  PhysicsAdapter,
+  RayHit,
+  ReconstructBodyOptions,
+} from './PhysicsAdapter';
 import type { PhysicsBody } from './PhysicsBody';
 
 interface RuntimeConnection {
@@ -30,6 +37,12 @@ interface RuntimePhysicsBody {
 interface PartRuntimeReference {
   readonly runtimeBody: RuntimePhysicsBody;
   readonly partId: string;
+}
+
+interface PartRuntimeState {
+  readonly pose: Pose;
+  readonly linearVelocity: Vector3;
+  readonly angularVelocity: Vector3;
 }
 
 function colliderFor(part: Part, material: Material): RAPIER.ColliderDesc {
@@ -221,6 +234,57 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
   }
 
   createBody(entity: Entity, origin: Vector3 = { x: 0, y: 0, z: 0 }): PhysicsBody {
+    return this.createBodyInternal(entity, origin);
+  }
+
+  reconstructBody(
+    oldBody: PhysicsBody,
+    revisedEntity: Entity,
+    options: ReconstructBodyOptions = {},
+  ): PhysicsBody {
+    const oldRuntimeBody = this.runtimeBodies.get(oldBody);
+    if (!oldRuntimeBody) throw new Error('Unknown physics body');
+
+    const preservedPartStates = new Map<string, PartRuntimeState>();
+    for (const part of revisedEntity.blueprint.parts) {
+      const handle = oldRuntimeBody.partHandles.get(part.id);
+      const runtimePart = handle === undefined ? undefined : this.bodies.get(handle);
+      if (handle === undefined || !runtimePart) continue;
+      const pose = this.readPose(handle);
+      const linearVelocity = runtimePart.linvel();
+      const angularVelocity = runtimePart.angvel();
+      preservedPartStates.set(part.id, {
+        pose,
+        linearVelocity: { x: linearVelocity.x, y: linearVelocity.y, z: linearVelocity.z },
+        angularVelocity: { x: angularVelocity.x, y: angularVelocity.y, z: angularVelocity.z },
+      });
+    }
+
+    // Build and validate the replacement while the old body remains intact.
+    // If creation fails, createBodyInternal removes any partially created
+    // Rapier objects and the caller can continue using oldBody.
+    const replacement = this.createBodyInternal(
+      revisedEntity,
+      options.origin ?? { x: 0, y: 0, z: 0 },
+      preservedPartStates,
+      options.activeConnectionIds,
+    );
+    try {
+      this.removeBody(oldBody);
+    } catch (error) {
+      // Do not leave two live representations if old-body teardown fails.
+      this.removeBody(replacement);
+      throw error;
+    }
+    return replacement;
+  }
+
+  private createBodyInternal(
+    entity: Entity,
+    origin: Vector3,
+    preservedPartStates?: ReadonlyMap<string, PartRuntimeState>,
+    activeConnectionIds?: readonly string[],
+  ): PhysicsBody {
     const errors = validateBlueprint(entity.blueprint);
     if (!entity.id.trim()) errors.push('Entity id is required');
     if (![origin.x, origin.y, origin.z].every(Number.isFinite)) errors.push('Origin must be finite');
@@ -228,36 +292,71 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
 
     const materials = new Map(entity.blueprint.materials.map((material) => [material.id, material]));
     const parts = new Map(entity.blueprint.parts.map((part) => [part.id, part]));
+    const activeConnections = activeConnectionIds === undefined
+      ? entity.blueprint.connections
+      : entity.blueprint.connections.filter((connection) => activeConnectionIds.includes(connection.id));
+    if (activeConnectionIds !== undefined) {
+      const connectionIds = new Set(entity.blueprint.connections.map((connection) => connection.id));
+      for (const connectionId of activeConnectionIds) {
+        if (!connectionIds.has(connectionId)) errors.push(`Unknown active connection id: ${connectionId}`);
+      }
+      if (errors.length) throw new Error(`Invalid Blueprint: ${errors.join('; ')}`);
+    }
     // Prepare every collider before touching the world; Rapier may reject a degenerate hull.
     const colliders = new Map(entity.blueprint.parts.map((part) => [
       part.id, colliderFor(part, materials.get(part.materialId)!),
     ]));
-    const joints = new Map(entity.blueprint.connections.map((connection) => [
+    const joints = new Map(activeConnections.map((connection) => [
       connection.id, jointFor(connection, parts.get(connection.fromPartId)!, parts.get(connection.toPartId)!),
     ]));
     const partHandles = new Map<string, BodyHandle>();
     const connectionHandles = new Map<string, number>();
     const partColliders = new Map<string, RAPIER.Collider>();
-    for (const part of entity.blueprint.parts) {
-      const { position, rotation } = part.pose;
-      const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
-        .setTranslation(position.x + origin.x, position.y + origin.y, position.z + origin.z)
-        .setRotation(rotation));
-      const collider = this.world.createCollider(colliders.get(part.id)!, body);
-      const handle = this.nextHandle++;
-      this.bodies.set(handle, body);
-      partHandles.set(part.id, handle);
-      partColliders.set(part.id, collider);
-    }
-    for (const connection of entity.blueprint.connections) {
-      const from = this.bodies.get(partHandles.get(connection.fromPartId)!)!;
-      const to = this.bodies.get(partHandles.get(connection.toPartId)!)!;
-      const joint = this.world.createImpulseJoint(joints.get(connection.id)!, from, to, true);
-      joint.setContactsEnabled(false);
-      connectionHandles.set(connection.id, joint.handle);
+    const createdBodies: RAPIER.RigidBody[] = [];
+    const createdJointHandles: number[] = [];
+    try {
+      for (const part of entity.blueprint.parts) {
+        const state = preservedPartStates?.get(part.id);
+        const position = state?.pose.position ?? {
+          x: part.pose.position.x + origin.x,
+          y: part.pose.position.y + origin.y,
+          z: part.pose.position.z + origin.z,
+        };
+        const rotation = state?.pose.rotation ?? part.pose.rotation;
+        const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
+          .setTranslation(position.x, position.y, position.z)
+          .setRotation(rotation));
+        createdBodies.push(body);
+        const collider = this.world.createCollider(colliders.get(part.id)!, body);
+        if (state) {
+          body.setLinvel(state.linearVelocity, true);
+          body.setAngvel(state.angularVelocity, true);
+        }
+        const handle = this.nextHandle++;
+        this.bodies.set(handle, body);
+        partHandles.set(part.id, handle);
+        partColliders.set(part.id, collider);
+      }
+      for (const connection of activeConnections) {
+        const from = this.bodies.get(partHandles.get(connection.fromPartId)!)!;
+        const to = this.bodies.get(partHandles.get(connection.toPartId)!)!;
+        const joint = this.world.createImpulseJoint(joints.get(connection.id)!, from, to, true);
+        joint.setContactsEnabled(false);
+        createdJointHandles.push(joint.handle);
+        connectionHandles.set(connection.id, joint.handle);
+      }
+    } catch (error) {
+      for (const jointHandle of createdJointHandles) {
+        if (this.world.impulseJoints.contains(jointHandle)) this.world.impulseJoints.remove(jointHandle, true);
+      }
+      for (const body of createdBodies) {
+        if (body.isValid()) this.world.removeRigidBody(body);
+      }
+      for (const handle of partHandles.values()) this.bodies.delete(handle);
+      throw error;
     }
     const runtimeConnections = new Map<string, RuntimeConnection>();
-    for (const connection of entity.blueprint.connections) {
+    for (const connection of activeConnections) {
       const fromPart = parts.get(connection.fromPartId)!;
       const toPart = parts.get(connection.toPartId)!;
       const axis = connection.kind === 'rigid' ? undefined : unitVector(connection.axis);

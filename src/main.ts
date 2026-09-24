@@ -6,6 +6,7 @@ import type { PhysicsBody } from './physics/PhysicsBody';
 import { ThreeSmokeRenderer } from './rendering/ThreeSmokeRenderer';
 import { ActiveBodyController, type ControlIntent, type JointFeedback } from './simulation/ActiveBodyController';
 import { BrainRuntime, type BrainSnapshot } from './simulation/BrainRuntime';
+import { ConstructionRuntime } from './simulation/ConstructionRuntime';
 import { SkillRuntime, type SkillRuntimeSnapshot } from './simulation/SkillRuntime';
 import { WorldRuntime, type WorldControlSource } from './simulation/WorldRuntime';
 import {
@@ -15,6 +16,7 @@ import {
 } from './tools/worldFixtures';
 import { createActiveBlueprint, getActiveBodyAssemblies } from './tools/activeBody';
 import { environmentScene } from './tools/environmentScene';
+import { mountGodSandboxPanel } from './tools/GodSandboxPanel';
 import { consoleLogSink } from './tools/logging';
 
 const IDENTITY_ROTATION = { x: 0, y: 0, z: 0, w: 1 } as const;
@@ -72,6 +74,7 @@ async function main(): Promise<void> {
   const physics = await RapierPhysicsAdapter.create();
   const renderer = new ThreeSmokeRenderer(app);
   const world = new WorldRuntime(physics, environmentScene);
+  const construction = new ConstructionRuntime(world);
   for (const surface of world.environment.listSurfaces()) {
     const color = surface.id === 'surface-slippery' ? 0x54819a
       : surface.id === 'surface-slope' ? 0x777c65 : 0x4a5057;
@@ -115,7 +118,9 @@ async function main(): Promise<void> {
   // This callback is the optional Agent composition. WorldRuntime owns the
   // actuator runtime and invokes the callback before its fixed physics step.
   const agentControl: WorldControlSource = (seconds) => {
-    const sensorRuntime = world.readSensorRuntime(agentId);
+    const agentCoreComponent = world.listComponents().find((component) => component.sourceEntityId === agentId
+      && component.partIds.includes('part-core'));
+    const sensorRuntime = agentCoreComponent ? world.readSensorRuntime(agentCoreComponent.id) : undefined;
     const view = sensorRuntime?.readAgentView();
     if (view && view.tick >= 0) {
       brainSnapshot = brain.update(view);
@@ -160,34 +165,47 @@ async function main(): Promise<void> {
     createControlSignal('machine-hinge-actuator', Math.sin(tick * 0.12)),
   ];
 
-  world.spawn(passiveEntity, { origin: { x: -3.2, y: 0, z: 1.3 } });
-  world.spawn(machineEntity, {
+  construction.spawn(passiveEntity, { origin: { x: -3.2, y: 0, z: 1.3 } });
+  construction.spawn(machineEntity, {
     origin: { x: 3.2, y: 0, z: 1.3 },
     energy: { availablePowerWatts: 100 },
     control: machineControl,
   });
-  world.spawn(sensorPlatformEntity, { origin: { x: -0.8, y: 0, z: -2.8 } });
-  world.spawn(sensorTargetEntity, { origin: { x: 1.25, y: 0, z: -2.8 } });
-  world.spawn(agentEntity, {
+  construction.spawn(sensorPlatformEntity, { origin: { x: -0.8, y: 0, z: -2.8 } });
+  construction.spawn(sensorTargetEntity, { origin: { x: 1.25, y: 0, z: -2.8 } });
+  construction.spawn(agentEntity, {
     origin: { x: 0, y: 0, z: 2.4 },
     energy: { availablePowerWatts: 400 },
     agent: { control: agentControl },
   });
 
-  const renderEntries: { entity: Entity; body: PhysicsBody; color: number }[] = [
-    { entity: passiveEntity, body: world.getPhysicsBody(passiveEntity.id), color: 0x82cfa6 },
-    { entity: machineEntity, body: world.getPhysicsBody(machineEntity.id), color: 0xd19a66 },
-    { entity: sensorPlatformEntity, body: world.getPhysicsBody(sensorPlatformEntity.id), color: 0x63c4d7 },
-    { entity: sensorTargetEntity, body: world.getPhysicsBody(sensorTargetEntity.id), color: 0x7d86cd },
-    { entity: agentEntity, body: world.getPhysicsBody(agentEntity.id), color: 0x9eb7c9 },
-  ];
-  for (const { entity, body, color } of renderEntries) {
-    for (const part of entity.blueprint.parts) {
-      const handle = body.partHandles.get(part.id);
-      if (handle === undefined) throw new Error(`Missing runtime handle for part: ${part.id}`);
-      renderer.addPart(handle, part.geometry, part.id === 'part-core' ? 0xe5b86a : color);
+  const colors = new Map<string, number>([
+    [passiveEntity.id, 0x82cfa6], [machineEntity.id, 0xd19a66],
+    [sensorPlatformEntity.id, 0x63c4d7], [sensorTargetEntity.id, 0x7d86cd],
+    [agentEntity.id, 0x9eb7c9],
+  ]);
+  let renderEntries: { entity: Entity; body: PhysicsBody; color: number }[] = [];
+  const renderedHandles = new Set<number>();
+  function syncRenderEntries(): void {
+    const current = new Set<number>();
+    renderEntries = world.listEntities().map(({ id }) => ({
+      entity: { id, blueprint: world.readBlueprint(id) },
+      body: world.getPhysicsBody(id), color: colors.get(id) ?? 0xa8be9a,
+    }));
+    for (const { entity, body, color } of renderEntries) {
+      for (const part of entity.blueprint.parts) {
+        const handle = body.partHandles.get(part.id)!;
+        current.add(handle);
+        if (!renderedHandles.has(handle)) renderer.addPart(handle, part.geometry, part.id === 'part-core' ? 0xe5b86a : color);
+        renderer.setPose(handle, body.readPartPose(part.id));
+      }
     }
+    for (const handle of renderedHandles) if (!current.has(handle)) renderer.removePart(handle);
+    renderedHandles.clear();
+    for (const handle of current) renderedHandles.add(handle);
   }
+  syncRenderEntries();
+  const sandboxPanel = mountGodSandboxPanel(app, world, construction, syncRenderEntries);
 
   function addButton(label: string, next: ControlIntent): void {
     const button = document.createElement('button');
@@ -216,15 +234,17 @@ async function main(): Promise<void> {
   const damageButton = document.createElement('button');
   damageButton.textContent = 'Impact / Damage';
   damageButton.addEventListener('click', () => {
-    const body = world.getPhysicsBody(agentId);
     const targetPartId = activeAssemblies[0].partIds[0];
-    const handle = body.partHandles.get(targetPartId);
-    const coreHandle = body.partHandles.get('part-core');
-    if (handle === undefined || coreHandle === undefined) throw new Error(`Missing runtime handle for impact: ${targetPartId}`);
     // A localized opposing impulse pair loads the attachment without
     // prescribing whether the structure withstands or separates.
-    physics.applyImpulse(handle, { x: 0, y: 0, z: -3 });
-    physics.applyImpulse(coreHandle, { x: 0, y: 0, z: 3 });
+    const target = world.listComponents().find((component) => component.sourceEntityId === agentId
+      && component.partIds.includes(targetPartId));
+    const core = world.listComponents().find((component) => component.sourceEntityId === agentId
+      && component.partIds.includes('part-core'));
+    if (target && core) {
+      construction.applyImpact(target.id, targetPartId, { x: 0, y: 0, z: -3 });
+      construction.applyImpact(core.id, 'part-core', { x: 0, y: 0, z: 3 });
+    }
   });
   controls.append(damageButton);
 
@@ -254,18 +274,18 @@ async function main(): Promise<void> {
   const impactButton = document.createElement('button');
   impactButton.textContent = 'External impact';
   impactButton.addEventListener('click', () => {
-    const corePose = world.readPartPose(agentId, 'part-core');
+    const coreComponent = world.listComponents().find((component) => component.sourceEntityId === agentId
+      && component.partIds.includes('part-core'));
+    if (!coreComponent) return;
+    const corePose = world.readPartPose(coreComponent.id, 'part-core');
     const entity: Entity = {
       id: `entity-impact-${nextImpactEntityId++}`,
       blueprint: createPassiveObjectBlueprint({ halfExtents: { x: 0.3, y: 0.3, z: 0.3 }, mass: 0.3 }),
     };
-    world.spawn(entity, { origin: { x: corePose.position.x, y: corePose.position.y - 0.3, z: corePose.position.z - 3 } });
-    const body = world.getPhysicsBody(entity.id);
-    const handle = body.partHandles.get('passive-object-body');
-    if (handle === undefined) throw new Error(`Missing impact Part: ${entity.id}`);
-    physics.applyImpulse(handle, { x: 0, y: 0, z: 1.5 });
-    renderer.addPart(handle, entity.blueprint.parts[0].geometry, 0xea6f65);
-    renderEntries.push({ entity, body, color: 0xea6f65 });
+    construction.spawn(entity, { origin: { x: corePose.position.x, y: corePose.position.y - 0.3, z: corePose.position.z - 3 } });
+    construction.applyImpact(entity.id, 'passive-object-body', { x: 0, y: 0, z: 1.5 });
+    colors.set(entity.id, 0xea6f65);
+    syncRenderEntries();
   });
   controls.append(impactButton);
 
@@ -311,31 +331,32 @@ async function main(): Promise<void> {
     return componentIds.flatMap((componentId) => world.readObservations(componentId));
   }
 
-  consoleLogSink.write({ level: 'info', source: 'world-scene', message: 'Phase 7 environment scene ready' });
+  consoleLogSink.write({ level: 'info', source: 'world-scene', message: 'Phase 8 God Sandbox ready' });
 
   let previousTime: number | undefined;
+  let lastPanelTick = -1;
   function frame(now: number): void {
     const elapsed = previousTime === undefined ? 0 : Math.max(0, (now - previousTime) / 1000);
     previousTime = now;
     world.advance(elapsed);
-
-    for (const { entity, body } of renderEntries) {
-      for (const part of entity.blueprint.parts) {
-        const handle = body.partHandles.get(part.id);
-        if (handle === undefined) continue;
-        renderer.setPose(handle, body.readPartPose(part.id));
-      }
+    if (world.tick !== lastPanelTick && world.tick % 30 === 0) {
+      sandboxPanel.refresh();
+      lastPanelTick = world.tick;
     }
-    const agentBody = world.getPhysicsBody(agentId);
-    const rootPose = agentBody.readPartPose('part-core');
-    const root = rootPose.position;
-    const { x, y, z, w } = rootPose.rotation;
+
+    syncRenderEntries();
+    const agentLive = world.inspectEntity(agentId)?.partIds.includes('part-core') ?? false;
+    const rootPose = agentLive ? world.getPhysicsBody(agentId).readPartPose('part-core') : undefined;
+    const root = rootPose?.position ?? { x: 0, y: 0, z: 0 };
+    const { x, y, z, w } = rootPose?.rotation ?? IDENTITY_ROTATION;
     const yaw = Math.atan2(2 * (w * y + x * z), 1 - 2 * (y * y + z * z));
     const agentComponents = world.listComponents().filter((component) => component.sourceEntityId === agentId);
     const agentObservations = readSensorObservations(agentComponents.map((component) => component.id));
     const platformView = world.inspectEntity(sensorPlatformId);
-    const platformObservations = world.readObservations(sensorPlatformId);
-    const platformSensorRuntime = world.readSensorRuntime(sensorPlatformId);
+    const platformComponent = world.listComponents().find((component) => component.sourceEntityId === sensorPlatformId
+      && component.partIds.includes('sensor-platform-body'));
+    const platformObservations = platformComponent ? world.readObservations(platformComponent.id) : [];
+    const platformSensorRuntime = platformComponent ? world.readSensorRuntime(platformComponent.id) : undefined;
     const platformRanges = platformObservations.filter((entry) => entry.channel === 'range');
     const nearestPlatformRange = platformRanges.length ? Math.min(...platformRanges.map((entry) => entry.values[3])) : undefined;
     const activeSensors = agentComponents.flatMap((component) => world.readSensorRuntime(component.id)?.readActiveSensorIds() ?? []);
@@ -343,7 +364,7 @@ async function main(): Promise<void> {
     const contacts = agentObservations.filter((entry) => entry.channel === 'contact');
     const nearestRange = rangeHits.length ? Math.min(...rangeHits.map((entry) => entry.values[3])) : undefined;
     const strongestContact = contacts.length ? Math.max(...contacts.map((entry) => entry.values[3])) : undefined;
-    const rangeSensor = agentEntity.blueprint.sensors?.find((sensor) => sensor.id === 'sensor-forward-range');
+    const rangeSensor = agentLive ? world.readBlueprint(agentId).sensors?.find((sensor) => sensor.id === 'sensor-forward-range') : undefined;
     const rangeSensorComponent = rangeSensor
       ? agentComponents.find((component) => component.sensorIds.includes(rangeSensor.id)
         && component.partIds.includes(rangeSensor.partId))
@@ -359,11 +380,11 @@ async function main(): Promise<void> {
         world.readSensorRuntime(rangeSensorComponent.id)?.readActiveSensorIds().includes(rangeSensor.id) ?? false,
       );
     }
-    const platformSensor = sensorPlatformEntity.blueprint.sensors?.[0];
-    if (platformSensor?.kind === 'range' && platformView) {
+    const platformSensor = platformView ? world.readBlueprint(sensorPlatformId).sensors?.[0] : undefined;
+    if (platformSensor?.kind === 'range' && platformComponent?.partIds.includes(platformSensor.partId)) {
       renderer.setMountedSensorRay(
         `platform-${platformSensor.id}`,
-        world.readPartPose(sensorPlatformId, platformSensor.partId),
+        world.readPartPose(platformComponent.id, platformSensor.partId),
         platformSensor.localPose,
         platformSensor.forward,
         platformSensor.range,
@@ -396,9 +417,9 @@ async function main(): Promise<void> {
       skillStatus.dataset.experiences = String(skillSnapshot.experienceCount);
     }
     renderer.render();
-    const separatedConnections = Object.values(world.getDamageRuntime(agentId).state.connections)
+    const separatedConnections = Object.values(agentLive ? world.getDamageRuntime(agentId).state.connections : {})
       .filter((connection) => !connection.connected).length;
-    status.textContent = `Morphodyne Phase 7 · ${mode} · tick ${world.tick} · x ${root.x.toFixed(2)} · y ${root.y.toFixed(2)} · z ${root.z.toFixed(2)} · yaw ${yaw.toFixed(2)}`;
+    status.textContent = `Morphodyne Phase 8 · ${mode} · tick ${world.tick} · x ${root.x.toFixed(2)} · y ${root.y.toFixed(2)} · z ${root.z.toFixed(2)} · yaw ${yaw.toFixed(2)}`;
     status.dataset.tick = String(world.tick);
     status.dataset.coreX = String(root.x);
     status.dataset.coreY = String(root.y);

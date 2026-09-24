@@ -13,7 +13,7 @@ canvas { display: block; }
   left: 16px;
   top: 16px;
   z-index: 10;
-  max-width: min(420px, calc(100vw - 32px));
+  max-width: min(420px, calc(100vw - 480px));
   max-height: min(75vh, 700px);
   overflow: auto;
   padding: 8px 10px;
@@ -30,3 +30,14 @@ canvas { display: block; }
 .environment-status { margin-top: 5px; color: #b5d9e8; white-space: pre-wrap; }
 .controls button { cursor: pointer; padding: 5px 8px; color: #eee; background: #344454; border: 1px solid #607084; border-radius: 4px; }
 .controls button:hover { background: #49627a; }
+
+@media (max-width: 700px) {
+  .status {
+    max-width: calc(100vw - 32px);
+    max-height: 22vh;
+  }
+  .god-sandbox {
+    top: calc(22vh + 24px);
+    max-height: calc(78vh - 40px);
+  }
+}
