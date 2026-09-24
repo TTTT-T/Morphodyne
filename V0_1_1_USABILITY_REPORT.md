@@ -21,4 +21,4 @@
 
 从目录新生成的 Agent 没有默认控制源，界面已标明“未控制”。“保存蓝图”把结构 JSON 放入高级编辑区供复制，不写入文件或保存整个世界状态。Windows 验证未运行；本次任务要求 Mac 浏览器 smoke。
 
-实现提交：`09a0bdf`（`feat(ui): make God Sandbox usable in Chinese`）。PR 链接将在创建后补入本报告。停止于 v0.1.1 评审边界，不开始 v0.2。
+实现提交：`09a0bdf`（`feat(ui): make God Sandbox usable in Chinese`）。评审 PR：[ #13 — v0.1.1: God Sandbox 中文化与易用性整理](https://github.com/TTTT-T/Morphodyne/pull/13)，目标分支 `main`。停止于 v0.1.1 评审边界，不开始 v0.2。
