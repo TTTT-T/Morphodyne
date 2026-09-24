@@ -26,8 +26,11 @@ describe('Rapier impact and structural separation', () => {
     physics.step(1 / 60);
 
     expect(physics.readPartImpactImpulse(body, 'target')).toBeCloseTo(5, 8);
+    expect(physics.readPartAppliedImpulse(body, 'target')).toBeCloseTo(5, 8);
+    expect(physics.readPartContactLoad(body, 'target')).toEqual({ impulseNs: 0, forceN: 0 });
     physics.step(1 / 60);
     expect(physics.readPartImpactImpulse(body, 'target')).toBe(0);
+    expect(physics.readPartAppliedImpulse(body, 'target')).toBe(0);
   });
 
   it('converts Rapier contact force events into a part impulse', async () => {
@@ -42,12 +45,18 @@ describe('Rapier impact and structural separation', () => {
     ]));
 
     let maximumImpulse = 0;
+    let maximumContactForce = 0;
     for (let tick = 0; tick < 120; tick += 1) {
       physics.step(1 / 60);
       maximumImpulse = Math.max(maximumImpulse, physics.readPartImpactImpulse(body, 'target'));
+      const contact = physics.readPartContactLoad(body, 'target');
+      maximumContactForce = Math.max(maximumContactForce, contact.forceN);
+      expect(contact.impulseNs).toBeCloseTo(contact.forceN / 60, 6);
+      expect(physics.readPartAppliedImpulse(body, 'target')).toBe(0);
     }
 
     expect(maximumImpulse).toBeGreaterThan(0);
+    expect(maximumContactForce).toBeGreaterThan(0);
   });
 
   it('removes a real joint and makes later actuator output a safe no-op', async () => {

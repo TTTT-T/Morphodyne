@@ -12,9 +12,15 @@ export interface BoxSpec {
 export type BodyHandle = number;
 
 export interface PhysicalContact {
-  /** Contact point in world coordinates; available only inside the sensor runtime. */
+  /** Contact point in world coordinates for sensor and debug observation. */
   readonly point: Vector3;
   readonly impulseNs: number;
+}
+
+/** Solver contact load on one Part during the last completed step. */
+export interface PartContactLoad {
+  readonly impulseNs: number;
+  readonly forceN: number;
 }
 
 export interface ConnectionLoad {
@@ -75,8 +81,12 @@ export interface PhysicsAdapter {
    * Part had no recorded external impulse or contact force in that step.
    */
   readPartImpactImpulse(body: PhysicsBody, partId: string): number;
+  /** Directly applied free impulse only, excluding contact-force events. */
+  readPartAppliedImpulse(body: PhysicsBody, partId: string): number;
   /** Actual narrow-phase contacts from the last completed step, excluding applied free impulses. */
   readPartContacts(body: PhysicsBody, partId: string): readonly PhysicalContact[];
+  /** Contact-force events only; excludes freely applied test impulses. */
+  readPartContactLoad(body: PhysicsBody, partId: string): PartContactLoad;
   /** Estimated load at a live structural connection from the most recent completed step. */
   readConnectionLoad(body: PhysicsBody, connectionId: string): ConnectionLoad;
   readPartAngularVelocity(body: PhysicsBody, partId: string): Vector3;

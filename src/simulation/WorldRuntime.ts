@@ -3,7 +3,7 @@ import { createDamageState, type DamageEvent, type StructuralDamageState } from 
 import type { EnvironmentSpec } from '../core/environment';
 import { validateBlueprint, type Blueprint, type Entity, type EntityId, type Pose, type Vector3 } from '../core/model';
 import { deriveStructuralComponents } from '../core/structureOwnership';
-import type { ConnectionLoad, PhysicalContact, PhysicsAdapter } from '../physics/PhysicsAdapter';
+import type { ConnectionLoad, PartContactLoad, PhysicalContact, PhysicsAdapter } from '../physics/PhysicsAdapter';
 import type { PhysicsBody } from '../physics/PhysicsBody';
 import { FixedStepSimulation } from './FixedStepSimulation';
 import { EnvironmentRuntime, type PartEnvironmentView, type PhysicalPartView } from './EnvironmentRuntime';
@@ -277,6 +277,13 @@ export class WorldRuntime {
     return this.physics.readPartContacts(record.body, partId);
   }
 
+  /** Debug-only measured external contact load from the latest step. */
+  readPartContactLoad(entityId: EntityId, partId: string): PartContactLoad | undefined {
+    const record = this.requireEntity(entityId);
+    if (!record.body.partHandles.has(partId)) return undefined;
+    return this.physics.readPartContactLoad(record.body, partId);
+  }
+
   /** Debug-only velocity at the selected Part origin. */
   readPartVelocity(entityId: EntityId, partId: string): Vector3 | undefined {
     const record = this.requireEntity(entityId);
@@ -337,7 +344,8 @@ export class WorldRuntime {
       const id = matched?.id ?? (next.size === 0 && previous.length === 0 ? record.entity.id : this.newFragmentId(record.entity.id));
       const connectionIds = group.connectionIds.filter((connectionId) => record.body.connectionHandles.has(connectionId));
       const cause = !matched && previous.length > 0 ? events.find((event) => event.kind === 'separation'
-        && event.target === 'connection' && event.partIds.some((partId) => group.partIds.includes(partId))) : undefined;
+        && event.target === 'connection' && event.connectionId !== undefined
+        && event.partIds?.some((partId) => group.partIds.includes(partId))) : undefined;
       const view: StructuralComponentView = {
         id, sourceEntityId: record.entity.id, partIds: group.partIds,
         connectionIds,
@@ -348,7 +356,7 @@ export class WorldRuntime {
         sensorIds: group.sensorIds,
         detached: groups.length === 1 ? false : (matched?.view.detached ?? previous.length > 0),
         ...(groups.length > 1 && matched?.view.separatedBy ? { separatedBy: matched.view.separatedBy }
-          : cause ? { separatedBy: { connectionId: cause.connectionId, tick } } : {}),
+          : cause?.connectionId ? { separatedBy: { connectionId: cause.connectionId, tick } } : {}),
       };
       const anchorPartId = matched?.anchorPartId ?? group.partIds[0];
       const sensor = matched?.sensor ?? ((group.sensorIds.length > 0)

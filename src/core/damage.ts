@@ -50,6 +50,16 @@ export interface ConnectionLoad {
   readonly torqueNm?: number;
   readonly seconds?: number;
   readonly tick?: number;
+  /** Runtime connection reaction is already distinct from direct Part contact. */
+  readonly loadEndpoints?: boolean;
+}
+
+export interface PartLoad {
+  readonly partId: string;
+  readonly impulseNs: number;
+  readonly forceN?: number;
+  readonly seconds?: number;
+  readonly tick?: number;
 }
 
 export type DamageEventKind = 'deformation' | 'fracture' | 'separation';
@@ -60,8 +70,8 @@ export interface DamageEvent {
   readonly target: 'part' | 'connection';
   readonly targetId: string;
   readonly partId?: string;
-  readonly connectionId: string;
-  readonly partIds: readonly [string, string];
+  readonly connectionId?: string;
+  readonly partIds?: readonly [string, string];
   readonly impulseNs: number;
   readonly forceN?: number;
   readonly torqueNm?: number;
@@ -420,13 +430,13 @@ export function applyConnectionLoad(
   const connectionTorqueYield = channelYield(connection, fromMaterial, toMaterial, 'TorqueNm');
   const connectionForceUltimate = channelUltimate(connection, fromMaterial, toMaterial, 'ForceN');
   const connectionTorqueUltimate = channelUltimate(connection, fromMaterial, toMaterial, 'TorqueNm');
-  const fromSustained = evolveSustained(currentFrom.damage, forceN, torqueNm, seconds, forceYield(fromMaterial), torqueYield(fromMaterial), forceUltimate(fromMaterial), torqueUltimate(fromMaterial));
-  const toSustained = evolveSustained(currentTo.damage, forceN, torqueNm, seconds, forceYield(toMaterial), torqueYield(toMaterial), forceUltimate(toMaterial), torqueUltimate(toMaterial));
+  const fromSustained = load.loadEndpoints === false ? currentFrom.damage : evolveSustained(currentFrom.damage, forceN, torqueNm, seconds, forceYield(fromMaterial), torqueYield(fromMaterial), forceUltimate(fromMaterial), torqueUltimate(fromMaterial));
+  const toSustained = load.loadEndpoints === false ? currentTo.damage : evolveSustained(currentTo.damage, forceN, torqueNm, seconds, forceYield(toMaterial), torqueYield(toMaterial), forceUltimate(toMaterial), torqueUltimate(toMaterial));
   const nextFromDamage = evolveDamage(
     fromSustained,
     materialToughness(fromMaterial),
     materialYield(fromMaterial),
-    load.impulseNs,
+    load.loadEndpoints === false ? 0 : load.impulseNs,
     currentFrom.residualLoadCapacityNs,
     false,
   );
@@ -434,7 +444,7 @@ export function applyConnectionLoad(
     toSustained,
     materialToughness(toMaterial),
     materialYield(toMaterial),
-    load.impulseNs,
+    load.loadEndpoints === false ? 0 : load.impulseNs,
     currentTo.residualLoadCapacityNs,
     false,
   );
@@ -510,4 +520,51 @@ export function applyConnectionLoad(
     connection: connections[connection.id],
     parts: [nextFrom, nextTo],
   };
+}
+
+/** Apply measured external contact to one Part's existing material state. */
+export function applyPartLoad(state: StructuralDamageState, blueprint: Blueprint, load: PartLoad): {
+  readonly state: StructuralDamageState; readonly events: readonly DamageEvent[]; readonly part: PartState;
+} {
+  if (!Number.isFinite(load.impulseNs) || load.impulseNs < 0) throw new RangeError('Part impulse must be finite and non-negative');
+  if (load.forceN !== undefined && (!Number.isFinite(load.forceN) || load.forceN < 0)) throw new RangeError('Part force must be finite and non-negative');
+  if (load.seconds !== undefined && (!Number.isFinite(load.seconds) || load.seconds < 0)) throw new RangeError('Part duration must be finite and non-negative');
+  if (load.forceN !== undefined && (!Number.isFinite(load.seconds) || (load.seconds ?? 0) <= 0)) throw new RangeError('Part force requires positive seconds');
+  if (load.tick !== undefined && !Number.isFinite(load.tick)) throw new RangeError('Part tick must be finite');
+  const current = getPartState(state, load.partId);
+  if (current.damage.state === 'fractured' || (load.impulseNs === 0 && !(load.forceN && load.forceN > 0))) return { state, events: [], part: current };
+  const material = materialFor(blueprint, current.materialId);
+  // Older Blueprints without an explicit material contact capacity remain
+  // physically present and do not acquire a new implicit brittle threshold.
+  if (material.yieldImpulseNs === undefined && material.toughnessImpulseNs === undefined
+    && material.yieldForceN === undefined && material.ultimateForceN === undefined) {
+    return { state, events: [], part: current };
+  }
+  const sustained = evolveSustained(current.damage, load.forceN ?? 0, 0, load.seconds ?? 0,
+    forceYield(material), Number.POSITIVE_INFINITY, forceUltimate(material), Number.POSITIVE_INFINITY);
+  const evolved = evolveDamage(sustained, materialToughness(material), materialYield(material),
+    material.yieldImpulseNs !== undefined || material.toughnessImpulseNs !== undefined ? load.impulseNs : 0,
+    current.residualLoadCapacityNs, false);
+  const next: PartState = { ...current, damage: evolved.damage, residualLoadCapacityNs: evolved.residualLoadCapacityNs };
+  const events: DamageEvent[] = [];
+  if (next.damage.state !== current.damage.state || next.damage.accumulatedImpulseNs !== current.damage.accumulatedImpulseNs
+    || next.damage.accumulatedOverloadSeconds !== current.damage.accumulatedOverloadSeconds) {
+    events.push({ kind: next.damage.state === 'fractured' ? 'fracture' : 'deformation', target: 'part',
+      targetId: load.partId, partId: load.partId, impulseNs: load.impulseNs, forceN: load.forceN,
+      seconds: load.seconds, tick: load.tick, previousState: current.damage.state, state: next.damage.state,
+      integrity: next.damage.integrity, residualLoadCapacityNs: next.residualLoadCapacityNs });
+  }
+  const connections: Record<string, ConnectionState> = { ...state.connections };
+  if (next.damage.state === 'fractured') {
+    for (const connection of blueprint.connections) {
+      if (connection.fromPartId !== load.partId && connection.toPartId !== load.partId) continue;
+      const old = connections[connection.id];
+      if (!old.connected) continue;
+      const separated: ConnectionState = { ...old,
+        damage: { ...old.damage, state: 'separated', integrity: 0 }, residualLoadCapacityNs: 0, connected: false };
+      connections[connection.id] = separated;
+      addConnectionEvents(events, old, separated, load.impulseNs, load.forceN, undefined, load.seconds, load.tick);
+    }
+  }
+  return { state: { parts: { ...state.parts, [load.partId]: next }, connections }, events, part: next };
 }

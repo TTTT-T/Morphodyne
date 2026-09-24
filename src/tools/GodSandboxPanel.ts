@@ -12,7 +12,7 @@ import type {
   Vector3,
 } from '../core/model';
 import type { StructuralDamageState } from '../core/damage';
-import type { ConnectionLoad } from '../physics/PhysicsAdapter';
+import type { ConnectionLoad, PartContactLoad } from '../physics/PhysicsAdapter';
 import type { SpawnOptions, StructuralComponentView, RuntimeEntityView, WorldRuntime } from '../simulation/WorldRuntime';
 import type { ConstructionRuntime } from '../simulation/ConstructionRuntime';
 import type { EnergyState } from '../simulation/EnergyRuntime';
@@ -50,6 +50,7 @@ export interface GodSandboxWorld {
   inspectEnergy?(entityId: string): EnergyState | undefined;
   readPartPose?(componentId: string, partId: string): { readonly position: Vector3 };
   readPartContacts?(entityId: string, partId: string): readonly unknown[];
+  readPartContactLoad?(entityId: string, partId: string): PartContactLoad | undefined;
   readPartVelocity?(entityId: string, partId: string): Vector3 | undefined;
   readConnectionLoad?(entityId: string, connectionId: string): ConnectionLoad | undefined;
   readonly environment?: {
@@ -947,7 +948,9 @@ export function mountGodSandboxPanel(
     const pose = selectedPartId && selectedComponentId ? world.readPartPose?.(selectedComponentId, selectedPartId) : undefined;
     const velocity = selectedPartId ? world.readPartVelocity?.(entity.id, selectedPartId) : undefined;
     const contacts = selectedPartId ? world.readPartContacts?.(entity.id, selectedPartId) : undefined;
-    partPosition.textContent = pose ? `当前位置：X ${pose.position.x.toFixed(2)} · Y ${pose.position.y.toFixed(2)} · Z ${pose.position.z.toFixed(2)}\n速度：${velocity ? `${velocity.x.toFixed(2)}, ${velocity.y.toFixed(2)}, ${velocity.z.toFixed(2)} m/s` : '无读数'} · 接触点 ${contacts?.length ?? 0}` : '';
+    const partDamage = selectedPartId ? inspection.damage.parts[selectedPartId]?.damage : undefined;
+    const contactLoad = selectedPartId ? world.readPartContactLoad?.(entity.id, selectedPartId) : undefined;
+    partPosition.textContent = pose ? `当前位置：X ${pose.position.x.toFixed(2)} · Y ${pose.position.y.toFixed(2)} · Z ${pose.position.z.toFixed(2)}\n速度：${velocity ? `${velocity.x.toFixed(2)}, ${velocity.y.toFixed(2)}, ${velocity.z.toFixed(2)} m/s` : '无读数'} · 接触点 ${contacts?.length ?? 0}\n部件材料：${damageLabel(partDamage?.state)} · 变形 ${(partDamage?.deformation ?? 0).toFixed(3)}${partDamage?.state === 'fractured' ? ' · 连接已失效，部件仍保留物理实体' : ''}\n最近外部接触：${contactLoad ? `${contactLoad.impulseNs.toFixed(2)} N·s · ${contactLoad.forceN.toFixed(2)} N` : '无读数'}` : '';
     connectionChoice.textContent = '';
     if (allConnections.length === 0) addOption(connectionChoice, '', '无连接');
     for (const { connection, detached: isDetached } of allConnections) {

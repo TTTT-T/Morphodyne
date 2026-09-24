@@ -5,6 +5,7 @@ import type {
   BodyHandle,
   BoxSpec,
   PhysicalContact,
+  PartContactLoad,
   ConnectionLoad,
   PhysicsAdapter,
   RayHit,
@@ -33,6 +34,8 @@ interface RuntimePhysicsBody {
   readonly connections: Map<string, RuntimeConnection>;
   readonly connectionHandles: Map<string, number>;
   readonly latestPartImpulses: Map<string, number>;
+  readonly latestPartAppliedImpulses: Map<string, number>;
+  readonly latestPartContactLoads: Map<string, PartContactLoad>;
   readonly pendingPartImpulses: Map<string, number>;
   readonly latestContacts: Map<string, PhysicalContact[]>;
   readonly latestConnectionLoads: Map<string, ConnectionLoad>;
@@ -447,8 +450,10 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       connections: runtimeConnections,
       connectionHandles,
       latestPartImpulses: new Map(entity.blueprint.parts.map((part) => [part.id, 0])),
+      latestPartAppliedImpulses: new Map(entity.blueprint.parts.map((part) => [part.id, 0])),
       pendingPartImpulses: new Map(),
       latestContacts: new Map(entity.blueprint.parts.map((part) => [part.id, []])),
+      latestPartContactLoads: new Map(entity.blueprint.parts.map((part) => [part.id, { impulseNs: 0, forceN: 0 }])),
       latestConnectionLoads: new Map(activeConnections.map((connection) => [connection.id, { forceN: 0, torqueNm: 0 }])),
       partColliders,
     };
@@ -529,6 +534,8 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       const contacts = runtimeBody.latestContacts.get(partId);
       if (contacts) contacts.length = 0;
       runtimeBody.latestContacts.delete(partId);
+      runtimeBody.latestPartContactLoads.delete(partId);
+      runtimeBody.latestPartAppliedImpulses.delete(partId);
       runtimeBody.partHandles.delete(partId);
       if (part.isValid()) this.world.removeRigidBody(part);
       this.bodies.delete(handle);
@@ -542,6 +549,8 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     runtimeBody.latestPartImpulses.clear();
     runtimeBody.pendingPartImpulses.clear();
     runtimeBody.latestContacts.clear();
+    runtimeBody.latestPartContactLoads.clear();
+    runtimeBody.latestPartAppliedImpulses.clear();
     this.activeRuntimeBodies.delete(runtimeBody);
     this.runtimeBodies.delete(body);
   }
@@ -619,12 +628,28 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     return runtimeBody.latestPartImpulses.get(partId)!;
   }
 
+  readPartAppliedImpulse(body: PhysicsBody, partId: string): number {
+    const runtimeBody = this.runtimeBodies.get(body);
+    if (!runtimeBody) throw new Error('Unknown physics body');
+    const impulse = runtimeBody.latestPartAppliedImpulses.get(partId);
+    if (impulse === undefined) throw new Error(`Unknown part id: ${partId}`);
+    return impulse;
+  }
+
   readPartContacts(body: PhysicsBody, partId: string): readonly PhysicalContact[] {
     const runtimeBody = this.runtimeBodies.get(body);
     if (!runtimeBody) throw new Error('Unknown physics body');
     const contacts = runtimeBody.latestContacts.get(partId);
     if (!contacts) throw new Error(`Unknown part id: ${partId}`);
     return contacts;
+  }
+
+  readPartContactLoad(body: PhysicsBody, partId: string): PartContactLoad {
+    const runtimeBody = this.runtimeBodies.get(body);
+    if (!runtimeBody) throw new Error('Unknown physics body');
+    const load = runtimeBody.latestPartContactLoads.get(partId);
+    if (!load) throw new Error(`Unknown part id: ${partId}`);
+    return load;
   }
 
   readConnectionLoad(body: PhysicsBody, connectionId: string): ConnectionLoad {
@@ -784,6 +809,8 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     }
     for (const runtimeBody of this.activeRuntimeBodies) {
       for (const partId of runtimeBody.latestPartImpulses.keys()) runtimeBody.latestPartImpulses.set(partId, 0);
+      for (const partId of runtimeBody.latestPartAppliedImpulses.keys()) runtimeBody.latestPartAppliedImpulses.set(partId, 0);
+      for (const partId of runtimeBody.latestPartContactLoads.keys()) runtimeBody.latestPartContactLoads.set(partId, { impulseNs: 0, forceN: 0 });
       for (const contacts of runtimeBody.latestContacts.values()) contacts.length = 0;
     }
     this.world.timestep = seconds;
@@ -812,6 +839,11 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       for (const reference of references) {
         if (!reference) continue;
         const { runtimeBody, partId } = reference;
+        const previous = runtimeBody.latestPartContactLoads.get(partId)!;
+        runtimeBody.latestPartContactLoads.set(partId, {
+          impulseNs: previous.impulseNs + impulse,
+          forceN: previous.forceN + event.totalForceMagnitude(),
+        });
         runtimeBody.latestPartImpulses.set(
           partId,
           (runtimeBody.latestPartImpulses.get(partId) ?? 0) + impulse,
@@ -884,6 +916,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     }
     for (const runtimeBody of this.activeRuntimeBodies) {
       for (const [partId, impulse] of runtimeBody.pendingPartImpulses) {
+        runtimeBody.latestPartAppliedImpulses.set(partId, impulse);
         runtimeBody.latestPartImpulses.set(
           partId,
           (runtimeBody.latestPartImpulses.get(partId) ?? 0) + impulse,
