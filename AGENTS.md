@@ -19,6 +19,9 @@ Architecture takes precedence over implementation convenience.
 - Keep the Simulation Core independent from Three.js wherever practical.
 - Three.js / Rapier is an execution backend, not the source of simulation semantics.
 - Physics is the final arbiter of physical outcomes.
+- Morphodyne is a world/structure simulator first; Agent, Brain, Skill, and Learning are optional subsystems.
+- The active quadruped is a validation fixture, not the architectural center or default Entity type.
+- Passive objects, non-Agent machines, sensor-bearing structures, and autonomous Agents must remain first-class use cases of the same Core abstractions.
 
 ## Development Priority
 
@@ -35,18 +38,40 @@ Morphodyne exists to realize the project vision and validate the simulation idea
 ## Scope Discipline
 
 - Work primarily on the active Phase and its acceptance goal.
+- After Phase 6, follow the Roadmap course correction: Phase 6.5 World/Generality work precedes new Environment or God Sandbox expansion.
+- Freeze new Brain, planner, Skill-learning, Jev/LLM, RL, social, and quadruped-locomotion features unless the active World/Environment/Construction work requires a narrow integration fix.
 - Do not implement later-phase features unless they are necessary to validate the active Phase or establish a required interface.
 - Prefer the smallest implementation that validates the current architectural contract.
 - Do not add speculative complexity for possible future needs.
 - Do not create object-specific shortcuts merely to produce a visible demo.
+- Do not assume every Entity has a root body, Brain, Skill set, locomotion goal, or autonomous controller.
+- When adding a core world mechanism, ask whether the same abstraction applies to a passive object, an actuated non-Agent machine, a sensor-bearing structure, and an Agent where relevant.
+- A mechanism that only works because createActiveBlueprint() or the current quadruped IDs exist belongs in a fixture/demo layer unless the abstraction is generalized first.
 
 ## Modularity
 
 - Break work into small modules with clear ownership boundaries.
+- WorldRuntime / Construction Runtime own world and structural lifecycle; UI and demo scenes must not become the source of world semantics.
+- Agent runtimes consume world-facing interfaces; WorldRuntime must not depend on Brain/Skill to manage ordinary Entities.
 - Keep dependencies directional and explicit.
 - Avoid large classes that own multiple simulation responsibilities.
 - Core types and rules should remain testable without launching Three.js wherever practical.
 - Do not split code into extra modules merely to satisfy an abstract notion of purity; modularity should make the project easier to reason about, change, or delegate.
+
+## Generality Gate
+
+For new Core, World, Environment, or Construction behavior, use the smallest cross-entity validation that can catch fixture-specific design.
+
+Where applicable, prefer evidence from more than one of:
+
+1. passive object;
+2. actuated machine without Brain;
+3. sensor-bearing non-Agent structure;
+4. autonomous Agent.
+
+Not every test needs all four. The purpose is to prevent the active quadruped from silently defining the architecture.
+
+Reject or redesign core changes that require semantic ability/type flags such as isLeg, isWheel, isAnimal, canWalk, movement stats, or equivalent outcome shortcuts.
 
 ## Testing Strategy
 
