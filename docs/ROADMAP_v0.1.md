@@ -4,9 +4,9 @@
 
 Each phase follows:
 
-**Implement → automated tests → required browser/physics validation → phase report → acceptance → next phase.**
+**Implement → focused validation → phase report → acceptance → next phase.**
 
-Do not skip ahead and bulk-implement later phases.
+Phase 8 intentionally combines Construction Runtime, God Sandbox UI, and final v0.1 validation into one delivery to reduce coordination overhead. Codex may use internal milestones, but should not create extra user handoff points unless materially necessary.
 
 Development environment:
 
@@ -337,13 +337,17 @@ No inWater => speed multiplier, rain => accuracy penalty, or Agent-only environm
 
 ---
 
-## Phase 8A — Construction Runtime
+## Phase 8 — Construction, God Sandbox & Core Validation
 
 ### Goal
 
-Make structure creation and recomposition a first-class runtime capability before building a polished God UI.
+Finish the v0.1 foundation in one integrated delivery instead of splitting Construction Runtime, God Sandbox UI, and final validation into separate handoffs.
 
-### Implement
+This is one Phase, one branch, one pull request, and one acceptance review. Codex may divide the work internally into implementation milestones, but it should not stop for user relay between them unless blocked by permissions or an architectural decision that cannot be resolved from the repository.
+
+### Internal milestone A — Construction Runtime
+
+Implement the runtime structural editing boundary:
 
 - Create / spawn Blueprint-backed Entity.
 - Add / remove Part where runtime-safe.
@@ -355,54 +359,36 @@ Make structure creation and recomposition a first-class runtime capability befor
 - Inspect structure.
 - Save / load Blueprint.
 - Blueprint Validator.
-- Clear handling of detached substructures and Entity/assembly ownership.
+- Clear detached-component and Entity/assembly ownership rules.
 
-### Acceptance
+Changing structure must change physical behavior through reconstruction/physics, never through capability flags.
 
-Without writing a new object-specific class, runtime APIs can construct and modify at least:
+### Internal milestone B — God Sandbox UI
 
-- a passive assembly;
-- an actuated non-Agent machine;
-- an Agent-bearing body.
-
-Changing structure must change physical behavior through reconstruction/physics, not through capability flags.
-
----
-
-## Phase 8B — God Sandbox UI
-
-### Goal
-
-Create the first usable god-sandbox shell on top of the Construction Runtime.
-
-### Implement minimal tools
+Build the first usable shell on top of Construction Runtime:
 
 - Spawn Blueprint.
 - Select / inspect Entity.
 - Inspect Part.
 - Inspect Connection.
 - Modify through Construction Runtime.
-- Attach.
-- Detach.
-- Damage.
-- Repair.
+- Attach / detach / reattach.
+- Damage / God Repair where currently supported.
 - Pause.
 - Step Tick.
 - Slow Motion.
 - Save / Load Blueprint.
 - Blueprint validation feedback.
 
-The UI must call World/Construction APIs rather than owning simulation semantics.
+The UI must call World/Construction APIs. It must not own world or structure semantics.
 
-UI quality is secondary to observability and correctness.
+UI quality remains secondary to observability and correctness.
 
----
+### Internal milestone C — Core Validation
 
-# Core Validation Milestone
+Before opening the Phase 8 PR, run the final v0.1 core experiments in the same branch.
 
-After Phases 0–8B, run the core acceptance experiments.
-
-## Experiment 1 — Structure Creates Capability
+#### Experiment 1 — Structure Creates Capability
 
 Create multiple structurally different Entities, including at least one non-Agent machine and one Agent-bearing body.
 
@@ -412,7 +398,7 @@ Do not give them speed/capability stats.
 
 Their physical and controlled performance should differ because of structure, actuation, material, and control rather than type labels.
 
-## Experiment 2 — Damage Creates Functional Loss
+#### Experiment 2 — Damage Creates Functional Loss
 
 Apply localized structural damage.
 
@@ -420,31 +406,47 @@ Do not invoke canned injury animation or debuff logic.
 
 Functional degradation must emerge from altered structure.
 
-## Experiment 3 — Environment Changes Capability
+#### Experiment 3 — Environment Changes Capability
 
 Run passive, actuated non-Agent, and Agent-bearing structures across applicable friction, slope, and medium conditions.
 
 Behavior should change through physical/environmental effects shared by the world rules.
 
-## Experiment 4 — Agent Acts on Belief
+#### Experiment 4 — Agent Acts on Belief
 
-Hide a target behind occlusion.
+Hide or remove a sensed target from the Agent's current perception.
 
 The Agent must act from Sensor + World Model information rather than authoritative coordinates.
 
-Expected phenomena may include:
+Expected phenomena may include losing track, stale/incorrect estimation, and rediscovery.
 
-- losing track
-- incorrect estimation
-- rediscovery
+#### Experiment 5 — Adaptation
 
-## Experiment 5 — Adaptation
-
-Damage or weaken one limb.
+Damage or weaken one limb/structural path.
 
 Existing Skill performance should degrade.
 
-After experience-based adjustment, the Agent should recover some locomotion without a pre-authored disability gait.
+After experience-based adjustment, the Agent should change control and recover some capability without a pre-authored disability gait.
+
+### Phase 8 acceptance
+
+The Phase is complete only when:
+
+- Construction Runtime can build and modify passive, non-Agent actuated, sensor-bearing, and Agent-bearing structures through the same generic model.
+- Detached structure can be intentionally detached/re-attached or reconstructed through an explicit construction path.
+- God Sandbox UI exercises the Construction Runtime rather than duplicating semantics.
+- The five core validation experiments pass with concise evidence.
+- The generality gate remains intact.
+- No semantic ability/type shortcuts are introduced.
+- tests, typecheck, build, browser smoke, and Phase report pass.
+
+Deliverables:
+
+- implementation;
+- concise `PHASE8_REPORT.md`;
+- one Phase 8 branch;
+- one PR targeting `main`;
+- stop at final v0.1 review.
 
 ---
 
