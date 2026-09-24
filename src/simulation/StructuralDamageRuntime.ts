@@ -7,6 +7,7 @@ import type { PhysicsBody } from '../physics/PhysicsBody';
 export class StructuralDamageRuntime {
   private current: StructuralDamageState;
   private readonly incidentConnections = new Map<string, readonly string[]>();
+  private readonly retiredParts = new Set<string>();
 
   constructor(
     private readonly blueprint: Blueprint,
@@ -23,6 +24,11 @@ export class StructuralDamageRuntime {
 
   get state(): StructuralDamageState { return this.current; }
 
+  /** Removed structural components no longer contribute physical load. */
+  retireParts(partIds: readonly string[]): void {
+    for (const partId of partIds) this.retiredParts.add(partId);
+  }
+
   /**
    * A first-order load path: an impacted Part shares its measured impulse
    * equally among its remaining structural connections. Rapier still decides
@@ -31,6 +37,7 @@ export class StructuralDamageRuntime {
   afterPhysicsStep(tick: number): readonly DamageEvent[] {
     const events: DamageEvent[] = [];
     for (const part of this.blueprint.parts) {
+      if (this.retiredParts.has(part.id)) continue;
       const impulseNs = this.physics.readPartImpactImpulse(this.body, part.id);
       if (impulseNs <= 0) continue;
       const connected = (this.incidentConnections.get(part.id) ?? [])

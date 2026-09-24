@@ -18,12 +18,13 @@ interface RuntimeConnection {
 }
 
 interface RuntimePhysicsBody {
-  readonly connections: ReadonlyMap<string, RuntimeConnection>;
+  readonly partHandles: Map<string, BodyHandle>;
+  readonly connections: Map<string, RuntimeConnection>;
   readonly connectionHandles: Map<string, number>;
   readonly latestPartImpulses: Map<string, number>;
   readonly pendingPartImpulses: Map<string, number>;
   readonly latestContacts: Map<string, PhysicalContact[]>;
-  readonly partColliders: ReadonlyMap<string, RAPIER.Collider>;
+  readonly partColliders: Map<string, RAPIER.Collider>;
 }
 
 interface PartRuntimeReference {
@@ -270,6 +271,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       });
     }
     const runtimeBody: RuntimePhysicsBody = {
+      partHandles,
       connections: runtimeConnections,
       connectionHandles,
       latestPartImpulses: new Map(entity.blueprint.parts.map((part) => [part.id, 0])),
@@ -295,6 +297,71 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       this.colliderRuntimeReferences.set(partColliders.get(part.id)!.handle, reference);
     }
     return physicsBody;
+  }
+
+  removeBody(body: PhysicsBody): void {
+    const runtimeBody = this.runtimeBodies.get(body);
+    if (!runtimeBody) throw new Error('Unknown physics body');
+    this.removeParts(body, [...runtimeBody.partHandles.keys()]);
+  }
+
+  removeParts(body: PhysicsBody, partIds: readonly string[]): void {
+    const runtimeBody = this.runtimeBodies.get(body);
+    if (!runtimeBody) throw new Error('Unknown physics body');
+
+    const requestedPartIds = new Set(partIds);
+    const removedBodies = new Set<RAPIER.RigidBody>();
+    const removedHandles = new Map<string, BodyHandle>();
+    for (const partId of requestedPartIds) {
+      const handle = runtimeBody.partHandles.get(partId);
+      const part = handle === undefined ? undefined : this.bodies.get(handle);
+      if (handle === undefined || !part) throw new Error(`Unknown part id: ${partId}`);
+      removedHandles.set(partId, handle);
+      removedBodies.add(part);
+    }
+    if (requestedPartIds.size === 0) return;
+
+    // Remove every connection touching the selected Parts first. This also
+    // handles connections that were already broken and no longer have a live
+    // Rapier joint handle.
+    for (const [connectionId, connection] of runtimeBody.connections) {
+      if (!removedBodies.has(connection.from) && !removedBodies.has(connection.to)) continue;
+      if (connection.jointHandle !== undefined && this.world.impulseJoints.contains(connection.jointHandle)) {
+        this.world.impulseJoints.remove(connection.jointHandle, true);
+      }
+      connection.jointHandle = undefined;
+      connection.broken = true;
+      runtimeBody.connectionHandles.delete(connectionId);
+      runtimeBody.connections.delete(connectionId);
+    }
+
+    for (const [partId, handle] of removedHandles) {
+      const part = this.bodies.get(handle)!;
+      const collider = runtimeBody.partColliders.get(partId);
+      if (collider) this.colliderRuntimeReferences.delete(collider.handle);
+      this.partRuntimeReferences.delete(handle);
+      this.actuatedBodies.delete(part);
+      runtimeBody.partColliders.delete(partId);
+      runtimeBody.latestPartImpulses.delete(partId);
+      runtimeBody.pendingPartImpulses.delete(partId);
+      const contacts = runtimeBody.latestContacts.get(partId);
+      if (contacts) contacts.length = 0;
+      runtimeBody.latestContacts.delete(partId);
+      runtimeBody.partHandles.delete(partId);
+      if (part.isValid()) this.world.removeRigidBody(part);
+      this.bodies.delete(handle);
+    }
+
+    if (runtimeBody.partHandles.size > 0) return;
+
+    runtimeBody.connections.clear();
+    runtimeBody.connectionHandles.clear();
+    runtimeBody.partColliders.clear();
+    runtimeBody.latestPartImpulses.clear();
+    runtimeBody.pendingPartImpulses.clear();
+    runtimeBody.latestContacts.clear();
+    this.activeRuntimeBodies.delete(runtimeBody);
+    this.runtimeBodies.delete(body);
   }
 
   applyImpulse(handle: BodyHandle, impulse: Vector3): void {

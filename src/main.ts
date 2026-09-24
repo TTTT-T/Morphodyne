@@ -2,29 +2,52 @@ import './style.css';
 import { createControlSignal } from './core/actuation';
 import type { Entity, Pose } from './core/model';
 import { RapierPhysicsAdapter } from './physics/RapierPhysicsAdapter';
+import type { PhysicsBody } from './physics/PhysicsBody';
 import { ThreeSmokeRenderer } from './rendering/ThreeSmokeRenderer';
 import { ActiveBodyController, type ControlIntent, type JointFeedback } from './simulation/ActiveBodyController';
 import { BrainRuntime, type BrainSnapshot } from './simulation/BrainRuntime';
 import { SkillRuntime, type SkillRuntimeSnapshot } from './simulation/SkillRuntime';
-import { FixedStepSimulation } from './simulation/FixedStepSimulation';
-import { JointActuatorRuntime } from './simulation/JointActuatorRuntime';
-import { SensorRuntime } from './simulation/SensorRuntime';
-import { StructuralDamageRuntime } from './simulation/StructuralDamageRuntime';
+import { WorldRuntime, type WorldControlSource } from './simulation/WorldRuntime';
+import {
+  createActuatedMachineBlueprint,
+  createPassiveObjectBlueprint,
+  createSensorPlatformBlueprint,
+} from './tools/worldFixtures';
 import { createActiveBlueprint, getActiveBodyAssemblies } from './tools/activeBody';
 import { consoleLogSink } from './tools/logging';
+
+const IDENTITY_ROTATION = { x: 0, y: 0, z: 0, w: 1 } as const;
+
+function formatIds(ids: readonly string[]): string {
+  return ids.length > 0 ? ids.join(', ') : '—';
+}
+
+function entityWorldLine(
+  entity: ReturnType<WorldRuntime['listEntities']>[number],
+  world: WorldRuntime,
+): string {
+  const components = entity.componentIds
+    .map((id) => world.inspectComponent(id))
+    .filter((component): component is NonNullable<ReturnType<WorldRuntime['inspectComponent']>> => component !== undefined);
+  const connectionIds = [...new Set(components.flatMap((component) => component.connectionIds))];
+  return `${entity.id} | P${entity.partIds.length} C${connectionIds.length} A${entity.actuatorIds.length} S${entity.sensorIds.length} | Agent=${entity.agentPresent ? 'yes' : 'no'}`;
+}
 
 async function main(): Promise<void> {
   const app = document.querySelector<HTMLDivElement>('#app');
   if (!app) throw new Error('Missing #app root element');
+
   const panel = document.createElement('div');
   panel.className = 'status';
   panel.setAttribute('role', 'status');
   app.append(panel);
   const status = document.createElement('div');
   panel.append(status);
+  const worldStatus = document.createElement('div');
+  worldStatus.className = 'world-status';
+  panel.append(worldStatus);
   const structureStatus = document.createElement('div');
   structureStatus.className = 'structure-status';
-  structureStatus.textContent = 'Structure intact';
   panel.append(structureStatus);
   const sensorStatus = document.createElement('div');
   sensorStatus.className = 'sensor-status';
@@ -49,28 +72,20 @@ async function main(): Promise<void> {
   const ground = physics.createBox(groundSpec);
   renderer.addBox(ground, groundSpec.halfExtents, 0x343b46);
   renderer.setPose(ground, physics.readPose(ground));
-  for (const [index, position] of [
-    { x: -0.85, y: 1, z: -2.5 },
-    { x: 1.8, y: 1, z: -4.2 },
-  ].entries()) {
-    const spec = { halfExtents: { x: 0.35, y: 0.35, z: 0.35 }, position, dynamic: false } as const;
-    const handle = physics.createBox(spec);
-    renderer.addBox(handle, spec.halfExtents, index === 0 ? 0x82cfa6 : 0x7d86cd);
-    renderer.setPose(handle, physics.readPose(handle));
-  }
 
-  const entity: Entity = { id: 'entity-active-body', blueprint: createActiveBlueprint() };
-  const rangeSensor = entity.blueprint.sensors?.find((sensor) => sensor.id === 'sensor-forward-range');
-  const body = physics.createBody(entity);
-  for (const part of entity.blueprint.parts) {
-    const handle = body.partHandles.get(part.id);
-    if (handle === undefined) throw new Error(`Missing runtime handle for part: ${part.id}`);
-    renderer.addPart(handle, part.geometry, part.id === 'part-core' ? 0xe5b86a : 0x9eb7c9);
-  }
+  const world = new WorldRuntime(physics);
+  const passiveEntity: Entity = { id: 'entity-passive-object', blueprint: createPassiveObjectBlueprint() };
+  const sensorTargetEntity: Entity = { id: 'entity-sensor-target', blueprint: createPassiveObjectBlueprint() };
+  const machineEntity: Entity = { id: 'entity-actuated-machine', blueprint: createActuatedMachineBlueprint() };
+  const sensorPlatformEntity: Entity = { id: 'entity-sensor-platform', blueprint: createSensorPlatformBlueprint() };
+  const agentEntity: Entity = { id: 'entity-active-agent', blueprint: createActiveBlueprint() };
+  const agentId = agentEntity.id;
+  const sensorPlatformId = sensorPlatformEntity.id;
 
-  const parts = new Map(entity.blueprint.parts.map((part) => [part.id, part]));
-  const groups = getActiveBodyAssemblies().map((assembly, index) => {
-    const position = parts.get(assembly.partIds[0])!.pose.position;
+  const agentParts = new Map(agentEntity.blueprint.parts.map((part) => [part.id, part]));
+  const activeAssemblies = getActiveBodyAssemblies();
+  const controller = ActiveBodyController.fromGroups(activeAssemblies.map((assembly, index) => {
+    const position = agentParts.get(assembly.partIds[0])!.pose.position;
     const phase = index === 0 || index === 3 ? 0 : Math.PI;
     return {
       actuatorIds: assembly.connectionIds.slice(0, 2).map((id) => `actuator-${id}`),
@@ -78,11 +93,8 @@ async function main(): Promise<void> {
       z: position.z,
       phaseOffsets: [phase, phase + Math.PI / 2],
     };
-  });
-  const controller = ActiveBodyController.fromGroups(groups, { standingGain: 0.01, standingDampingGain: 0, jointPositionGain: 3, jointVelocityGain: 0.6, turnGain: 0 });
-  const actuatorRuntime = new JointActuatorRuntime(entity.blueprint, physics, body, { availablePowerWatts: 400 });
-  const damageRuntime = new StructuralDamageRuntime(entity.blueprint, physics, body);
-  const sensorRuntime = new SensorRuntime(entity.blueprint, 'part-core', physics, body, () => damageRuntime.state);
+  }), { standingGain: 0.01, standingDampingGain: 0, jointPositionGain: 3, jointVelocityGain: 0.6, turnGain: 0 });
+
   const brain = new BrainRuntime();
   const skill = new SkillRuntime();
   let brainSnapshot: BrainSnapshot | null = null;
@@ -90,56 +102,13 @@ async function main(): Promise<void> {
   let autonomous = true;
   let intent: ControlIntent = { forward: 0, turn: 0 };
   let mode = 'Auto · Stand';
-  const projectiles: number[] = [];
 
-  function addButton(label: string, next: ControlIntent): void {
-    const button = document.createElement('button');
-    button.textContent = label;
-    button.addEventListener('click', () => { autonomous = false; skill.cancelAttempt(); intent = next; mode = label; });
-    controls.append(button);
-  }
-  addButton('Stand', { forward: 0, turn: 0 });
-  addButton('Forward', { forward: 1, turn: 0 });
-  addButton('Turn left', { forward: 0, turn: -1 });
-  addButton('Turn right', { forward: 0, turn: 1 });
-  const autoButton = document.createElement('button');
-  autoButton.textContent = 'Auto brain';
-  autoButton.addEventListener('click', () => { autonomous = true; });
-  controls.append(autoButton);
-  const damageButton = document.createElement('button');
-  damageButton.textContent = 'Impact / Damage';
-  damageButton.addEventListener('click', () => {
-    const targetPartId = getActiveBodyAssemblies()[0].partIds[0];
-    const handle = body.partHandles.get(targetPartId);
-    if (handle === undefined) throw new Error(`Missing runtime handle for part: ${targetPartId}`);
-    // A localized opposing impulse pair loads the attachment without
-    // prescribing whether the structure withstands or separates.
-    physics.applyImpulse(handle, { x: 0, y: 0, z: -3 });
-    physics.applyImpulse(body.partHandles.get('part-core')!, { x: 0, y: 0, z: 3 });
-  });
-  controls.append(damageButton);
-  const resetButton = document.createElement('button');
-  resetButton.textContent = 'Reset experiment';
-  resetButton.addEventListener('click', () => location.reload());
-  controls.append(resetButton);
-  const impactButton = document.createElement('button');
-  impactButton.textContent = 'External impact';
-  impactButton.addEventListener('click', () => {
-    const spec = {
-      halfExtents: { x: 0.3, y: 0.3, z: 0.3 },
-      position: { x: 0, y: 1.8, z: body.readPartPose('part-core').position.z - 3 },
-      dynamic: true,
-    } as const;
-    const handle = physics.createBox(spec);
-    physics.applyImpulse(handle, { x: 0, y: 0, z: 1.5 });
-    renderer.addBox(handle, spec.halfExtents, 0xea6f65);
-    projectiles.push(handle);
-  });
-  controls.append(impactButton);
-
-  const simulation = new FixedStepSimulation(physics, (seconds) => {
-    const view = sensorRuntime.readAgentView();
-    if (view.tick >= 0) {
+  // This callback is the optional Agent composition. WorldRuntime owns the
+  // actuator runtime and invokes the callback before its fixed physics step.
+  const agentControl: WorldControlSource = (seconds) => {
+    const sensorRuntime = world.readSensorRuntime(agentId);
+    const view = sensorRuntime?.readAgentView();
+    if (view && view.tick >= 0) {
       brainSnapshot = brain.update(view);
       if (autonomous) {
         skillSnapshot = skill.update(brainSnapshot);
@@ -147,7 +116,8 @@ async function main(): Promise<void> {
         mode = `Auto · ${brainSnapshot.skillIntent.skill}`;
       }
     }
-    const perception = view.perceptions;
+
+    const perception = view?.perceptions ?? [];
     const joints = new Map<string, JointFeedback>();
     for (const measured of perception) {
       if (measured.channel !== 'joint' || !measured.ownConnectionId) continue;
@@ -159,56 +129,204 @@ async function main(): Promise<void> {
     const angular = perception.find((entry) => entry.sensorId === 'sensor-core-internal' && entry.channel === 'angular-velocity');
     const sensedPose: Pose = {
       position: { x: 0, y: 0, z: 0 },
-      rotation: orientation ? { x: orientation.values[0], y: orientation.values[1], z: orientation.values[2], w: orientation.values[3] }
-        : { x: 0, y: 0, z: 0, w: 1 },
+      rotation: orientation
+        ? { x: orientation.values[0], y: orientation.values[1], z: orientation.values[2], w: orientation.values[3] }
+        : IDENTITY_ROTATION,
     };
-    const signals = controller.update(seconds, sensedPose, intent, { joints,
+    const signals = controller.update(seconds, sensedPose, intent, {
+      joints,
       ...(angular ? { bodyAngularVelocity: { x: angular.values[0], y: angular.values[1], z: angular.values[2] } } : {}),
     });
-    const driveSignals = getActiveBodyAssemblies().map((assembly) => {
-      const x = parts.get(assembly.partIds[0])!.pose.position.x;
-      return createControlSignal(`actuator-${assembly.connectionIds[2]}`, Math.max(-1, Math.min(1, 0.03 * intent.forward * (intent.amplitude ?? 1) + intent.turn * Math.sign(x))));
+    const driveSignals = activeAssemblies.map((assembly) => {
+      const x = agentParts.get(assembly.partIds[0])!.pose.position.x;
+      return createControlSignal(
+        `actuator-${assembly.connectionIds[2]}`,
+        Math.max(-1, Math.min(1, 0.03 * intent.forward * (intent.amplitude ?? 1) + intent.turn * Math.sign(x))),
+      );
     });
-    actuatorRuntime.step([...signals, ...driveSignals, createControlSignal('actuator-connection-4', intent.turn)], seconds);
-  }, (_seconds, tick) => {
-    const events = damageRuntime.afterPhysicsStep(tick);
-    sensorRuntime.afterPhysicsStep(tick, simulation.fixedSeconds);
-    const separated = Object.values(damageRuntime.state.connections)
-      .filter((connection) => !connection.connected).map((connection) => connection.connectionId);
-    const structural = events.filter((event) => event.target === 'connection');
-    if (separated.length > 0) {
-      structureStatus.textContent = `Separated: ${separated.join(', ')}`;
-    } else if (structural.length > 0) {
-      const latest = structural.find((event) => event.kind === 'separation') ?? structural[structural.length - 1];
-      structureStatus.textContent = `${latest.connectionId}: ${latest.kind} · load ${latest.impulseNs.toFixed(2)} N·s`;
-    }
+    return [...signals, ...driveSignals, createControlSignal('actuator-connection-4', intent.turn)];
+  };
+
+  const machineControl: WorldControlSource = (_seconds, tick) => [
+    createControlSignal('machine-hinge-actuator', Math.sin(tick * 0.12)),
+  ];
+
+  world.spawn(passiveEntity, { origin: { x: -3.2, y: 0, z: 1.3 } });
+  world.spawn(machineEntity, {
+    origin: { x: 3.2, y: 0, z: 1.3 },
+    energy: { availablePowerWatts: 100 },
+    control: machineControl,
   });
-  consoleLogSink.write({ level: 'info', source: 'active-body', message: 'Phase 6 skill adaptation scene ready' });
+  world.spawn(sensorPlatformEntity, { origin: { x: -0.8, y: 0, z: -2.8 } });
+  world.spawn(sensorTargetEntity, { origin: { x: 1.25, y: 0, z: -2.8 } });
+  world.spawn(agentEntity, {
+    origin: { x: 0, y: 0, z: 2.4 },
+    energy: { availablePowerWatts: 400 },
+    agent: { control: agentControl },
+  });
+
+  const renderEntries: { entity: Entity; body: PhysicsBody; color: number }[] = [
+    { entity: passiveEntity, body: world.getPhysicsBody(passiveEntity.id), color: 0x82cfa6 },
+    { entity: machineEntity, body: world.getPhysicsBody(machineEntity.id), color: 0xd19a66 },
+    { entity: sensorPlatformEntity, body: world.getPhysicsBody(sensorPlatformEntity.id), color: 0x63c4d7 },
+    { entity: sensorTargetEntity, body: world.getPhysicsBody(sensorTargetEntity.id), color: 0x7d86cd },
+    { entity: agentEntity, body: world.getPhysicsBody(agentEntity.id), color: 0x9eb7c9 },
+  ];
+  for (const { entity, body, color } of renderEntries) {
+    for (const part of entity.blueprint.parts) {
+      const handle = body.partHandles.get(part.id);
+      if (handle === undefined) throw new Error(`Missing runtime handle for part: ${part.id}`);
+      renderer.addPart(handle, part.geometry, part.id === 'part-core' ? 0xe5b86a : color);
+    }
+  }
+
+  function addButton(label: string, next: ControlIntent): void {
+    const button = document.createElement('button');
+    button.textContent = label;
+    button.addEventListener('click', () => {
+      autonomous = false;
+      skill.cancelAttempt();
+      intent = next;
+      mode = label;
+    });
+    controls.append(button);
+  }
+  addButton('Stand', { forward: 0, turn: 0 });
+  addButton('Forward', { forward: 1, turn: 0 });
+  addButton('Turn left', { forward: 0, turn: -1 });
+  addButton('Turn right', { forward: 0, turn: 1 });
+
+  const autoButton = document.createElement('button');
+  autoButton.textContent = 'Auto brain';
+  autoButton.addEventListener('click', () => {
+    autonomous = true;
+    mode = 'Auto · waiting';
+  });
+  controls.append(autoButton);
+
+  const damageButton = document.createElement('button');
+  damageButton.textContent = 'Impact / Damage';
+  damageButton.addEventListener('click', () => {
+    const body = world.getPhysicsBody(agentId);
+    const targetPartId = activeAssemblies[0].partIds[0];
+    const handle = body.partHandles.get(targetPartId);
+    const coreHandle = body.partHandles.get('part-core');
+    if (handle === undefined || coreHandle === undefined) throw new Error(`Missing runtime handle for impact: ${targetPartId}`);
+    // A localized opposing impulse pair loads the attachment without
+    // prescribing whether the structure withstands or separates.
+    physics.applyImpulse(handle, { x: 0, y: 0, z: -3 });
+    physics.applyImpulse(coreHandle, { x: 0, y: 0, z: 3 });
+  });
+  controls.append(damageButton);
+
+  const resetButton = document.createElement('button');
+  resetButton.textContent = 'Reset experiment';
+  resetButton.addEventListener('click', () => location.reload());
+  controls.append(resetButton);
+
+  let nextImpactEntityId = 1;
+  const impactButton = document.createElement('button');
+  impactButton.textContent = 'External impact';
+  impactButton.addEventListener('click', () => {
+    const corePose = world.readPartPose(agentId, 'part-core');
+    const entity: Entity = {
+      id: `entity-impact-${nextImpactEntityId++}`,
+      blueprint: createPassiveObjectBlueprint({ halfExtents: { x: 0.3, y: 0.3, z: 0.3 }, mass: 0.3 }),
+    };
+    world.spawn(entity, { origin: { x: corePose.position.x, y: corePose.position.y - 0.3, z: corePose.position.z - 3 } });
+    const body = world.getPhysicsBody(entity.id);
+    const handle = body.partHandles.get('passive-object-body');
+    if (handle === undefined) throw new Error(`Missing impact Part: ${entity.id}`);
+    physics.applyImpulse(handle, { x: 0, y: 0, z: 1.5 });
+    renderer.addPart(handle, entity.blueprint.parts[0].geometry, 0xea6f65);
+    renderEntries.push({ entity, body, color: 0xea6f65 });
+  });
+  controls.append(impactButton);
+
+  function updateWorldPanel(): void {
+    const entities = world.listEntities();
+    const components = world.listComponents();
+    const detached = components.filter((component) => component.detached);
+    const componentLines = detached.length === 0
+      ? 'Detached components: none'
+      : `Detached components:\n${detached.map((component) => {
+        const cause = component.separatedBy
+          ? ` via ${component.separatedBy.connectionId} @ tick ${component.separatedBy.tick}`
+          : '';
+        return `  ${component.id} <= ${component.sourceEntityId} parts [${formatIds(component.partIds)}]${cause}`;
+      }).join('\n')}`;
+    worldStatus.textContent = [`World entities: ${entities.length}`, ...entities.map((entity) => entityWorldLine(entity, world)), componentLines].join('\n');
+    structureStatus.textContent = detached.length === 0
+      ? 'Structure: all components attached'
+      : `Structure: ${detached.length} detached component${detached.length === 1 ? '' : 's'}; ownership retained by source Entity`;
+  }
+
+  function readSensorObservations(componentIds: readonly string[]) {
+    return componentIds.flatMap((componentId) => world.readObservations(componentId));
+  }
+
+  consoleLogSink.write({ level: 'info', source: 'active-body', message: 'Phase 6.5 world scene ready' });
 
   let previousTime: number | undefined;
   function frame(now: number): void {
     const elapsed = previousTime === undefined ? 0 : Math.max(0, (now - previousTime) / 1000);
     previousTime = now;
-    simulation.advance(elapsed);
-    for (const part of entity.blueprint.parts) {
-      const handle = body.partHandles.get(part.id)!;
-      renderer.setPose(handle, body.readPartPose(part.id));
+    world.advance(elapsed);
+
+    for (const { entity, body } of renderEntries) {
+      for (const part of entity.blueprint.parts) {
+        const handle = body.partHandles.get(part.id);
+        if (handle === undefined) continue;
+        renderer.setPose(handle, body.readPartPose(part.id));
+      }
     }
-    for (const handle of projectiles) renderer.setPose(handle, physics.readPose(handle));
-    const rootPose = body.readPartPose('part-core');
+    const agentBody = world.getPhysicsBody(agentId);
+    const rootPose = agentBody.readPartPose('part-core');
     const root = rootPose.position;
     const { x, y, z, w } = rootPose.rotation;
     const yaw = Math.atan2(2 * (w * y + x * z), 1 - 2 * (y * y + z * z));
-    const perception = sensorRuntime.readAgentView();
-    const activeSensors = sensorRuntime.readActiveSensorIds();
-    const contacts = perception.perceptions.filter((entry) => entry.channel === 'contact');
-    const rangeHits = perception.perceptions.filter((entry) => entry.channel === 'range');
+    const agentComponents = world.listComponents().filter((component) => component.sourceEntityId === agentId);
+    const agentObservations = readSensorObservations(agentComponents.map((component) => component.id));
+    const platformView = world.inspectEntity(sensorPlatformId);
+    const platformObservations = world.readObservations(sensorPlatformId);
+    const platformSensorRuntime = world.readSensorRuntime(sensorPlatformId);
+    const platformRanges = platformObservations.filter((entry) => entry.channel === 'range');
+    const nearestPlatformRange = platformRanges.length ? Math.min(...platformRanges.map((entry) => entry.values[3])) : undefined;
+    const activeSensors = agentComponents.flatMap((component) => world.readSensorRuntime(component.id)?.readActiveSensorIds() ?? []);
+    const rangeHits = agentObservations.filter((entry) => entry.channel === 'range');
+    const contacts = agentObservations.filter((entry) => entry.channel === 'contact');
     const nearestRange = rangeHits.length ? Math.min(...rangeHits.map((entry) => entry.values[3])) : undefined;
     const strongestContact = contacts.length ? Math.max(...contacts.map((entry) => entry.values[3])) : undefined;
-    if (rangeSensor?.kind === 'range') renderer.setMountedSensorRay(rangeSensor.id,
-      body.readPartPose(rangeSensor.partId), rangeSensor.localPose, rangeSensor.forward,
-      rangeSensor.range, activeSensors.includes(rangeSensor.id));
-    sensorStatus.textContent = `Sensors ${activeSensors.length}/${entity.blueprint.sensors?.length ?? 0} · range ${rangeHits.length}${nearestRange === undefined ? '' : `, nearest ${nearestRange.toFixed(2)} m`} · contacts ${contacts.length}${strongestContact === undefined ? '' : `, peak ${strongestContact.toFixed(2)} N·s`} · observations ${sensorRuntime.readObservations().length}`;
+    const rangeSensor = agentEntity.blueprint.sensors?.find((sensor) => sensor.id === 'sensor-forward-range');
+    const rangeSensorComponent = rangeSensor
+      ? agentComponents.find((component) => component.sensorIds.includes(rangeSensor.id)
+        && component.partIds.includes(rangeSensor.partId))
+      : undefined;
+    if (rangeSensor?.kind === 'range' && rangeSensorComponent) {
+      const sensorPartPose = world.readPartPose(rangeSensorComponent.id, rangeSensor.partId);
+      renderer.setMountedSensorRay(
+        `agent-${rangeSensor.id}`,
+        sensorPartPose,
+        rangeSensor.localPose,
+        rangeSensor.forward,
+        rangeSensor.range,
+        world.readSensorRuntime(rangeSensorComponent.id)?.readActiveSensorIds().includes(rangeSensor.id) ?? false,
+      );
+    }
+    const platformSensor = sensorPlatformEntity.blueprint.sensors?.[0];
+    if (platformSensor?.kind === 'range' && platformView) {
+      renderer.setMountedSensorRay(
+        `platform-${platformSensor.id}`,
+        world.readPartPose(sensorPlatformId, platformSensor.partId),
+        platformSensor.localPose,
+        platformSensor.forward,
+        platformSensor.range,
+        platformSensorRuntime?.readActiveSensorIds().includes(platformSensor.id) ?? false,
+      );
+    }
+
+    updateWorldPanel();
+    sensorStatus.textContent = `Sensor platform ${sensorPlatformId}: active ${platformSensorRuntime?.readActiveSensorIds().length ?? 0}/${sensorPlatformEntity.blueprint.sensors?.length ?? 0} · observations ${platformObservations.length} · range ${platformRanges.length}${nearestPlatformRange === undefined ? '' : `, nearest ${nearestPlatformRange.toFixed(2)} m`} · Agent observations ${agentObservations.length} · contacts ${contacts.length}${strongestContact === undefined ? '' : `, peak ${strongestContact.toFixed(2)} N·s`}`;
     if (brainSnapshot) {
       const { selfModel, worldModel, drives, decision, skillIntent } = brainSnapshot;
       brainStatus.textContent = `Brain ${autonomous ? 'auto' : 'manual'} · goal ${decision?.goal.kind ?? 'none'} · skill ${skillIntent.skill} · avoid ${drives.avoid.toFixed(2)} · explore ${drives.explore.toFixed(2)} · self ${selfModel.stability.level} · feedback gap ${selfModel.feedbackGapRecent ? 'recent' : 'none'} · surfaces ${worldModel.ranges.length} · joints ${selfModel.joints.length}`;
@@ -232,13 +350,15 @@ async function main(): Promise<void> {
       skillStatus.dataset.experiences = String(skillSnapshot.experienceCount);
     }
     renderer.render();
-    status.textContent = `Morphodyne Phase 6 · ${mode} · tick ${simulation.tick} · x ${root.x.toFixed(2)} · y ${root.y.toFixed(2)} · z ${root.z.toFixed(2)} · yaw ${yaw.toFixed(2)}`;
-    status.dataset.tick = String(simulation.tick);
+    const separatedConnections = Object.values(world.getDamageRuntime(agentId).state.connections)
+      .filter((connection) => !connection.connected).length;
+    status.textContent = `Morphodyne Phase 6.5 · ${mode} · tick ${world.tick} · x ${root.x.toFixed(2)} · y ${root.y.toFixed(2)} · z ${root.z.toFixed(2)} · yaw ${yaw.toFixed(2)}`;
+    status.dataset.tick = String(world.tick);
     status.dataset.coreX = String(root.x);
     status.dataset.coreY = String(root.y);
     status.dataset.coreZ = String(root.z);
     status.dataset.yaw = String(yaw);
-    status.dataset.separatedConnections = String(Object.values(damageRuntime.state.connections).filter((connection) => !connection.connected).length);
+    status.dataset.separatedConnections = String(separatedConnections);
     status.dataset.activeSensors = String(activeSensors.length);
     status.dataset.rangeReturns = String(rangeHits.length);
     status.dataset.nearestRange = nearestRange === undefined ? '' : String(nearestRange);
@@ -251,5 +371,5 @@ async function main(): Promise<void> {
 void main().catch((error: unknown) => {
   consoleLogSink.write({ level: 'error', source: 'bootstrap', message: String(error) });
   const app = document.querySelector('#app');
-  if (app) app.textContent = `Active scene failed: ${String(error)}`;
+  if (app) app.textContent = `World scene failed: ${String(error)}`;
 });

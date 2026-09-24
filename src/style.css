@@ -11,16 +11,20 @@ canvas { display: block; }
 .status {
   position: fixed;
   left: 16px;
-  top: 16px;
+  bottom: 16px;
   z-index: 10;
+  max-width: min(420px, calc(100vw - 32px));
+  max-height: min(54vh, 480px);
+  overflow: auto;
   padding: 8px 10px;
-  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
   color: #eee;
   background: rgba(0, 0, 0, 0.55);
   border-radius: 6px;
 }
 
 .controls { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; max-width: 420px; }
+.world-status { margin-top: 7px; color: #e3e6eb; white-space: pre-wrap; }
 .structure-status { margin-top: 4px; color: #b9d8e5; }
 .sensor-status { margin-top: 4px; color: #8fe1b6; }
 .controls button { cursor: pointer; padding: 5px 8px; color: #eee; background: #344454; border: 1px solid #607084; border-radius: 4px; }

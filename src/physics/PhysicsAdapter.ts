@@ -24,6 +24,10 @@ export interface RayHit {
 export interface PhysicsAdapter {
   createBox(spec: BoxSpec): BodyHandle;
   createBody(entity: Entity, origin?: Vector3): PhysicsBody;
+  /** Remove every Part, Connection, and backend object owned by one runtime body. */
+  removeBody(body: PhysicsBody): void;
+  /** Remove selected Parts and every Connection incident to them. */
+  removeParts(body: PhysicsBody, partIds: readonly string[]): void;
   applyImpulse(handle: BodyHandle, impulse: Vector3): void;
   applyTorqueImpulse(handle: BodyHandle, torque: Vector3): void;
   /**

@@ -12,8 +12,8 @@ export class ThreeSmokeRenderer {
 
   constructor(container: HTMLElement) {
     this.scene.background = new THREE.Color(0x15191f);
-    this.camera.position.set(6, 5, 8);
-    this.camera.lookAt(0, 1, 0);
+    this.camera.position.set(10, 7, 13);
+    this.camera.lookAt(0, 0.8, 0);
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setSize(innerWidth, innerHeight);
     container.append(this.renderer.domElement);
