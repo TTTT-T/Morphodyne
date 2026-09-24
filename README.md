@@ -37,9 +37,9 @@ See:
 
 ## Status
 
-**Pre-alpha / Phase 7 complete. Phase 8 Construction + God Sandbox + Core Validation next.**
+**v0.1 simulation foundation validated. Phase 8 Construction + God Sandbox + Core Validation complete.**
 
-The project currently prioritizes universal world/structure rules, causal correctness, modularity, and testability over visual fidelity or content volume. The active quadruped is a validation Blueprint, not the architectural center of the project.
+The v0.1 foundation now includes WorldRuntime, Environment, runtime construction/recomposition, God Sandbox tooling, optional Agent systems, structural damage, sensing, and adaptation. The active quadruped remains a validation Blueprint, not the architectural center of the project.
 
 
 ## Quick start
