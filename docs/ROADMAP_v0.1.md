@@ -245,14 +245,72 @@ Forbidden shortcut:
 
 ---
 
-## Phase 7 — Environment Interaction
+## Direction correction after Phase 6
+
+Phases 4–6 successfully proved the Agent sensing, decision, Skill, and adaptation chain, but they used one active quadruped as the main validation fixture. That fixture must not become the implicit center of the simulation.
+
+For the remainder of v0.1:
+
+- treat the active quadruped as one test Blueprint, not the default ontology;
+- freeze new Brain / learning features except integration fixes;
+- prioritize World, Entity lifecycle, Environment, and Construction;
+- validate new core mechanisms on structurally different Entity classes where relevant;
+- never require an Entity to own a Brain, Skill, or locomotion controller.
+
+A useful generality gate is:
+
+1. passive object;
+2. actuated machine without an Agent;
+3. sensor-bearing structure without a Brain;
+4. autonomous Agent.
+
+A core world rule should affect these through the same underlying abstractions whenever the rule is applicable.
+
+---
+
+## Phase 6.5 — Generality & World Foundation
 
 ### Goal
 
-Prove that environment effects emerge from generic rules rather than debuffs.
+Prove that Morphodyne is a universal world/structure simulator rather than an active-quadruped simulator, and establish the minimal runtime ownership needed for later construction.
 
 ### Implement
 
+- Minimal WorldRuntime / world-state owner.
+- Entity registry and lifecycle.
+- Spawn and remove Entity at runtime.
+- World-owned access to physical Entity instances without leaking backend semantics into Core.
+- Minimal structural operations needed to support future construction boundaries.
+- Explicit treatment of detached structures so they can become independently inspectable/manipulable world objects or structural components.
+- Generality fixtures:
+  - passive object;
+  - articulated/actuated machine without Brain;
+  - sensor-bearing non-Agent structure;
+  - existing quadruped Agent.
+
+Do not add new Brain, planner, Skill-learning, Jev/LLM, RL, or richer quadruped locomotion features.
+
+### Acceptance
+
+- Passive and non-Agent Entities are first-class runtime citizens.
+- The world can contain multiple structurally different Entities at once.
+- Spawning/removing an Entity does not require Agent concepts.
+- At least one actuated non-Agent machine produces a physical result through the same Actuator → Physics chain.
+- Existing Agent behavior still works without becoming the WorldRuntime API.
+- No new core field such as isAnimal, isWheel, isLeg, canWalk, or equivalent is introduced.
+- The next Environment and Construction phases can depend on WorldRuntime rather than on main.ts scene-specific wiring.
+
+---
+
+## Phase 7 — World & Environment
+
+### Goal
+
+Make Environment a first-class part of the world and prove that environmental effects emerge from generic physical/sensory rules rather than Agent debuffs.
+
+### Implement
+
+- Environment ownership in WorldRuntime.
 - Surface.
 - Medium / Volume.
 - Field.
@@ -262,32 +320,68 @@ Prove that environment effects emerge from generic rules rather than debuffs.
 - simple day/night.
 - Clear / Rain.
 
+Use low-fidelity models where appropriate, but route effects through physics, materials, sensors, or other universal mechanisms.
+
 ### Acceptance
 
-The same Agent behaves differently on:
+Validate applicable environment rules across structurally different cases, not only the quadruped.
 
-- dry ground
-- slippery ground
-- slopes
-- water
+Examples:
 
-Differences must arise from physics and sensor/environment inputs.
+- passive box + machine + Agent respond to surface friction through the same contact/material path;
+- passive/active structures entering water respond to the same buoyancy/drag model;
+- slope behavior follows gravity/contact geometry;
+- Rain changes physical or sensory conditions rather than applying a semantic movement/accuracy penalty.
+
+No inWater => speed multiplier, rain => accuracy penalty, or Agent-only environmental shortcuts.
 
 ---
 
-## Phase 8 — God Sandbox Tools
+## Phase 8A — Construction Runtime
 
 ### Goal
 
-Create the first usable god-sandbox shell around the simulation.
+Make structure creation and recomposition a first-class runtime capability before building a polished God UI.
+
+### Implement
+
+- Create / spawn Blueprint-backed Entity.
+- Add / remove Part where runtime-safe.
+- Modify geometry/material/mass through an explicit reconstruction path.
+- Create / remove Connection.
+- Attach / detach / reattach structures.
+- Add / remove Actuator.
+- Add / remove Sensor.
+- Inspect structure.
+- Save / load Blueprint.
+- Blueprint Validator.
+- Clear handling of detached substructures and Entity/assembly ownership.
+
+### Acceptance
+
+Without writing a new object-specific class, runtime APIs can construct and modify at least:
+
+- a passive assembly;
+- an actuated non-Agent machine;
+- an Agent-bearing body.
+
+Changing structure must change physical behavior through reconstruction/physics, not through capability flags.
+
+---
+
+## Phase 8B — God Sandbox UI
+
+### Goal
+
+Create the first usable god-sandbox shell on top of the Construction Runtime.
 
 ### Implement minimal tools
 
 - Spawn Blueprint.
-- Inspect Entity.
+- Select / inspect Entity.
 - Inspect Part.
 - Inspect Connection.
-- Modify.
+- Modify through Construction Runtime.
 - Attach.
 - Detach.
 - Damage.
@@ -296,7 +390,9 @@ Create the first usable god-sandbox shell around the simulation.
 - Step Tick.
 - Slow Motion.
 - Save / Load Blueprint.
-- Blueprint Validator.
+- Blueprint validation feedback.
+
+The UI must call World/Construction APIs rather than owning simulation semantics.
 
 UI quality is secondary to observability and correctness.
 
@@ -304,15 +400,17 @@ UI quality is secondary to observability and correctness.
 
 # Core Validation Milestone
 
-After Phases 0–8, run five acceptance experiments.
+After Phases 0–8B, run the core acceptance experiments.
 
 ## Experiment 1 — Structure Creates Capability
 
-Create two similar-looking quadruped Entities with different internal structure.
+Create multiple structurally different Entities, including at least one non-Agent machine and one Agent-bearing body.
 
-Do not give them speed stats.
+For a focused comparison, create two similar-looking structures with meaningful internal differences.
 
-Their resulting motion performance should differ because of structure and control.
+Do not give them speed/capability stats.
+
+Their physical and controlled performance should differ because of structure, actuation, material, and control rather than type labels.
 
 ## Experiment 2 — Damage Creates Functional Loss
 
@@ -324,9 +422,9 @@ Functional degradation must emerge from altered structure.
 
 ## Experiment 3 — Environment Changes Capability
 
-Run the same Agent across different friction, slope, and medium conditions.
+Run passive, actuated non-Agent, and Agent-bearing structures across applicable friction, slope, and medium conditions.
 
-Behavior should change through physical/environmental effects.
+Behavior should change through physical/environmental effects shared by the world rules.
 
 ## Experiment 4 — Agent Acts on Belief
 
@@ -352,7 +450,7 @@ After experience-based adjustment, the Agent should recover some locomotion with
 
 # v0.1 success condition
 
-If all five experiments succeed, the simulation foundation is considered validated.
+If the core experiments succeed **and the generality gate remains intact**, the simulation foundation is considered validated.
 
 Only then should the project seriously expand into areas such as:
 
