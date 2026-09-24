@@ -23,6 +23,9 @@ canvas { display: block; }
   border-radius: 6px;
 }
 
+.status > summary { cursor: pointer; }
+.status[open] > summary { margin-bottom: 7px; }
+
 .controls { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; max-width: 480px; }
 .world-status { margin-top: 7px; color: #e3e6eb; white-space: pre-wrap; }
 .structure-status { margin-top: 4px; color: #b9d8e5; }

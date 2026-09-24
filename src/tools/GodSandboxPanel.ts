@@ -45,6 +45,11 @@ export interface GodSandboxWorld {
   stepOnce(): void;
   setTimeScale(value: number): void;
   listEntities(): readonly RuntimeEntityView[];
+  readonly environment?: {
+    setWeather(weather: 'clear' | 'rain'): void;
+    setTimeOfDay(hour: number): void;
+    readonly state?: { readonly weather?: 'clear' | 'rain'; readonly timeOfDay?: number };
+  };
 }
 
 export interface GodSandboxInspection {
@@ -89,16 +94,55 @@ export interface GodSandboxPanelHandle {
 }
 
 const DEFAULT_CATALOG: readonly GodSandboxCatalogEntry[] = [
-  { id: 'passive-object', label: 'Passive object', blueprint: () => createPassiveObjectBlueprint() },
-  { id: 'actuated-machine', label: 'Actuated machine', blueprint: () => createActuatedMachineBlueprint(),
+  { id: 'passive-object', label: '箱子 / 被动物体', blueprint: () => createPassiveObjectBlueprint() },
+  { id: 'actuated-machine', label: '简单机械结构', blueprint: () => createActuatedMachineBlueprint(),
     spawnOptions: { energy: { availablePowerWatts: 100 },
       control: (_seconds, tick) => [createControlSignal('machine-hinge-actuator', Math.sin(tick * 0.12))] } },
-  { id: 'sensor-platform', label: 'Sensor platform', blueprint: () => createSensorPlatformBlueprint() },
-  { id: 'active-body', label: 'Active body (uncontrolled)', blueprint: () => createActiveBlueprint() },
+  { id: 'sensor-platform', label: '传感器平台', blueprint: () => createSensorPlatformBlueprint() },
+  { id: 'active-body', label: 'Agent（未控制）', blueprint: () => createActiveBlueprint() },
 ];
 
 function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof SyntaxError) return 'JSON 格式有误，请检查括号、逗号和引号。';
+  if (message.startsWith('Invalid Blueprint: ')) {
+    return message.slice('Invalid Blueprint: '.length).split('; ').map(localizeValidationError).join('；');
+  }
+  if (message.startsWith('Blueprint must contain')) return '蓝图需要材料、部件和连接三个数组（materials、parts、connections）。';
+  if (/[\u3400-\u9fff]/.test(message)) return message;
+  return /[A-Za-z]{2,}/.test(message) ? '操作未完成，请检查当前选择和输入内容。' : message;
+}
+
+function localizeValidationError(message: string): string {
+  const prefixes: Readonly<Record<string, string>> = {
+    'Blueprint id is required': '蓝图编号不能为空',
+    'Blueprint must contain materials, parts, and connections arrays': '蓝图需要材料、部件和连接三个数组（materials、parts、connections）',
+    'A runtime Entity requires at least one Part': '物体至少需要一个部件',
+    'Invalid or duplicate material id': '材料编号为空或重复',
+    'Invalid density': '材料密度无效',
+    'Invalid friction': '材料摩擦系数无效',
+    'Invalid restitution': '材料弹性系数无效',
+    'Invalid or duplicate part id': '部件编号为空或重复',
+    'Unknown material': '部件引用了不存在的材料',
+    'Invalid pose': '部件姿态无效',
+    'Invalid mass': '部件质量无效',
+    'Invalid or duplicate connection id': '连接编号为空或重复',
+    'Unknown connection endpoint': '连接引用了不存在的部件',
+    'Self connection': '连接不能指向同一个部件',
+    'Misaligned connection anchors': '连接锚点未对齐',
+    'Invalid connection anchors': '连接锚点无效',
+    'Invalid connection kind': '连接类型无效',
+    'Invalid connection axis': '连接轴无效',
+    'Invalid connection limits': '连接范围无效',
+    'Invalid or duplicate actuator id': '执行器编号为空或重复',
+    'Unknown actuator connection': '执行器引用了不存在的连接',
+    'Actuator requires a revolute or prismatic connection': '执行器需要旋转或滑动连接',
+    'Invalid or duplicate sensor id': '传感器编号为空或重复',
+    'Unknown sensor part': '传感器引用了不存在的部件',
+  };
+  const colon = message.indexOf(': ');
+  const key = colon < 0 ? message : message.slice(0, colon);
+  return `${prefixes[key] ?? '蓝图结构有误'}${colon < 0 ? '' : `：${message.slice(colon + 2)}`}`;
 }
 
 function makeId(prefix: string, used: Iterable<string>): string {
@@ -124,13 +168,13 @@ function blueprintFromEntry(entry: GodSandboxCatalogEntry): Blueprint {
 
 function parseNumber(value: string, label: string): number {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) throw new Error(`${label} must be a finite number`);
+  if (!Number.isFinite(parsed)) throw new Error(`${label}必须是有效数字`);
   return parsed;
 }
 
 function parsePositive(value: string, label: string): number {
   const parsed = parseNumber(value, label);
-  if (parsed <= 0) throw new Error(`${label} must be greater than zero`);
+  if (parsed <= 0) throw new Error(`${label}必须大于零`);
   return parsed;
 }
 
@@ -149,6 +193,13 @@ function inverseRotate(vector: Vector3, rotation: { readonly x: number; readonly
     y: vector.y + q.w * doubled.y + q.z * doubled.x - q.x * doubled.z,
     z: vector.z + q.w * doubled.z + q.x * doubled.y - q.y * doubled.x,
   };
+}
+
+function hint(parent: HTMLElement, message: string): void {
+  const element = document.createElement('p');
+  element.className = 'god-sandbox-hint';
+  element.textContent = message;
+  parent.append(element);
 }
 
 function labeled<T extends HTMLElement>(parent: HTMLElement, label: string, control: T): T {
@@ -212,19 +263,19 @@ function selectedValue(select: HTMLSelectElement): string | undefined {
 function selectedGeometry(part: Part, kind: Geometry['kind'], a: string, b: string, c: string, pointsJson: string): Geometry {
   switch (kind) {
     case 'box':
-      return { kind, halfExtents: { x: parsePositive(a, 'Half extent X'), y: parsePositive(b, 'Half extent Y'), z: parsePositive(c, 'Half extent Z') } };
+      return { kind, halfExtents: { x: parsePositive(a, '半长 X'), y: parsePositive(b, '半长 Y'), z: parsePositive(c, '半长 Z') } };
     case 'sphere':
-      return { kind, radius: parsePositive(a, 'Radius') };
+      return { kind, radius: parsePositive(a, '半径') };
     case 'capsule':
-      return { kind, radius: parsePositive(a, 'Radius'), halfHeight: parsePositive(b, 'Half height') };
+      return { kind, radius: parsePositive(a, '半径'), halfHeight: parsePositive(b, '半高') };
     case 'convex': {
       if (part.geometry.kind === 'convex' && pointsJson.trim() === '') return part.geometry;
       const points: unknown = JSON.parse(pointsJson);
-      if (!Array.isArray(points)) throw new Error('Convex points must be a JSON array');
+      if (!Array.isArray(points)) throw new Error('凸形顶点必须是 JSON 数组');
       return { kind, points: points as readonly Vector3[] };
     }
     default:
-      throw new Error(`Unsupported geometry kind: ${String(kind)}`);
+      throw new Error(`不支持的形状：${String(kind)}`);
   }
 }
 
@@ -245,12 +296,20 @@ function buildRigidConnection(id: string, from: Part, to: Part): Connection {
   };
 }
 
+function friendlyBlueprintName(id: string): string {
+  if (id.includes('passive-object')) return '箱子 / 被动物体';
+  if (id.includes('actuated-machine')) return '简单机械结构';
+  if (id.includes('sensor-platform')) return '传感器平台';
+  if (id.includes('active-body')) return 'Agent';
+  return '物体';
+}
+
 function renderDamageSummary(damage: StructuralDamageState): string {
   const partStates = Object.values(damage.parts);
   const connectionStates = Object.values(damage.connections);
   const damagedParts = partStates.filter((entry) => entry.damage.state !== 'intact').length;
   const damagedConnections = connectionStates.filter((entry) => entry.damage.state !== 'intact').length;
-  return `Damage: ${damagedParts}/${partStates.length} Parts · ${damagedConnections}/${connectionStates.length} Connections affected`;
+  return `受损部件 ${damagedParts}/${partStates.length} · 受损连接 ${damagedConnections}/${connectionStates.length}`;
 }
 
 /** Mount a small framework-free God Sandbox control surface. */
@@ -264,11 +323,11 @@ export function mountGodSandboxPanel(
   const catalog = resolveCatalog(options.catalog);
   const root = document.createElement('section');
   root.className = 'god-sandbox';
-  root.setAttribute('aria-label', 'God Sandbox');
+  root.setAttribute('aria-label', '上帝沙盒');
   host.append(root);
 
   const heading = document.createElement('h2');
-  heading.textContent = 'God Sandbox';
+  heading.textContent = 'Morphodyne 世界沙盒';
   root.append(heading);
   const status = document.createElement('div');
   status.className = 'god-sandbox-status';
@@ -290,36 +349,63 @@ export function mountGodSandboxPanel(
     return candidate;
   }
 
-  const time = fieldset(root, 'World time');
-  const pauseButton = button(time, '', () => run('World pause state updated', () => { world.paused = !world.paused; }));
-  button(time, 'Step tick', () => run('Advanced one fixed tick', () => world.stepOnce()));
-  const timeScale = labeled(time, 'Time scale', selectInput());
-  for (const value of [0.1, 0.25, 0.5, 1, 2]) addOption(timeScale, String(value), `${value}×`, value === 1);
-  timeScale.addEventListener('change', () => run(`Time scale set to ${timeScale.value}×`, () => world.setTimeScale(parseNumber(timeScale.value, 'Time scale'))));
+  const worldGroup = fieldset(root, '世界');
+  hint(worldGroup, '当前世界中的物体会显示在下方列表。');
+  const createGroup = fieldset(root, '创建');
+  const editGroup = fieldset(root, '编辑当前物体');
+  const impactGroup = fieldset(root, '作用与破坏修复');
+  const timeGroup = fieldset(root, '时间控制');
+  const environmentGroup = fieldset(root, '环境');
+  const advanced = document.createElement('details');
+  advanced.className = 'god-sandbox-advanced';
+  const advancedSummary = document.createElement('summary');
+  advancedSummary.textContent = '高级调试';
+  root.append(advanced);
+  advanced.append(advancedSummary);
 
-  const spawn = fieldset(root, 'Spawn Blueprint');
-  const blueprintChoice = labeled(spawn, 'Catalog', selectInput());
+  const time = fieldset(timeGroup, '时间控制');
+  const pauseButton = button(time, '', () => run('运行状态已更新', () => { world.paused = !world.paused; }));
+  button(time, '单步运行', () => run('已前进一步', () => world.stepOnce()));
+  const timeScale = labeled(time, '时间速度', selectInput());
+  for (const value of [0.1, 0.25, 0.5, 1, 2]) addOption(timeScale, String(value), `${value}×`, value === 1);
+  timeScale.addEventListener('change', () => run(`时间速度已设为 ${timeScale.value} 倍`, () => world.setTimeScale(parseNumber(timeScale.value, '时间速度'))));
+  hint(time, '暂停后可单步观察；时间速度会影响模拟推进快慢。');
+
+  const environmentApi = world.environment;
+  const weatherActions = document.createElement('div');
+  weatherActions.className = 'god-sandbox-actions';
+  environmentGroup.append(weatherActions);
+  const clearWeather = button(weatherActions, '晴天', () => run('天气已切换为晴天', () => { if (!environmentApi) throw new Error('当前世界不支持环境控制'); environmentApi.setWeather('clear'); }));
+  const rainWeather = button(weatherActions, '下雨', () => run('天气已切换为下雨', () => { if (!environmentApi) throw new Error('当前世界不支持环境控制'); environmentApi.setWeather('rain'); }));
+  const dayButton = button(weatherActions, '白天', () => run('时间已切换为白天', () => { if (!environmentApi) throw new Error('当前世界不支持环境控制'); environmentApi.setTimeOfDay(12); }));
+  const nightButton = button(weatherActions, '夜晚', () => run('时间已切换为夜晚', () => { if (!environmentApi) throw new Error('当前世界不支持环境控制'); environmentApi.setTimeOfDay(0); }));
+  if (!environmentApi) { clearWeather.disabled = true; rainWeather.disabled = true; dayButton.disabled = true; nightButton.disabled = true; hint(environmentGroup, '此测试世界未提供环境控制接口。'); }
+
+  const spawn = fieldset(createGroup, '生成物体');
+  const blueprintChoice = labeled(spawn, '物体类型', selectInput());
+  hint(spawn, 'Agent 示例目前未受控，只用于查看结构和物理表现。');
   for (const entry of catalog) addOption(blueprintChoice, entry.id, entry.label ?? entry.id);
-  const entityIdInput = labeled(spawn, 'Entity id', textInput('sandbox-entity-1'));
+  const entityIdInput = labeled(advanced, '物体内部编号（高级）', textInput(nextSandboxEntityId()));
   const spawnOrigin = document.createElement('div');
   spawnOrigin.className = 'god-sandbox-row';
   const spawnX = labeled(spawnOrigin, 'X', numberInput('0'));
   const spawnY = labeled(spawnOrigin, 'Y', numberInput('0'));
   const spawnZ = labeled(spawnOrigin, 'Z', numberInput('0'));
   spawn.append(spawnOrigin);
-  button(spawn, 'Spawn', () => run('Blueprint spawned', () => {
+  hint(spawn, '选择物体类型并生成到指定位置。');
+  button(spawn, '生成', () => run('已生成物体', () => {
     const entry = catalog.find((candidate) => candidate.id === blueprintChoice.value);
-    if (!entry) throw new Error('Choose a Blueprint catalog entry');
+    if (!entry) throw new Error('请选择要生成的物体类型');
     const entityId = entityIdInput.value.trim();
-    if (!entityId) throw new Error('Entity id is required');
+    if (!entityId) throw new Error('物体内部编号不能为空');
     const entity: Entity = { id: entityId, blueprint: blueprintFromEntry(entry) };
     const spawnOptions: SpawnOptions = {
       ...entry.spawnOptions,
       ...options.spawnOptions,
       origin: {
-        x: parseNumber(spawnX.value, 'Spawn X'),
-        y: parseNumber(spawnY.value, 'Spawn Y'),
-        z: parseNumber(spawnZ.value, 'Spawn Z'),
+        x: parseNumber(spawnX.value, '生成位置 X'),
+        y: parseNumber(spawnY.value, '生成位置 Y'),
+        z: parseNumber(spawnZ.value, '生成位置 Z'),
       },
     };
     construction.spawn(entity, spawnOptions);
@@ -327,57 +413,63 @@ export function mountGodSandboxPanel(
     entityIdInput.value = nextSandboxEntityId();
   }, true));
 
-  const selection = fieldset(root, 'Inspect structure');
-  const entityChoice = labeled(selection, 'Entity', selectInput());
+  const selection = fieldset(worldGroup, '当前世界与物体');
+  hint(selection, '选择物体后，可在下方编辑结构或施加作用。');
+  const entityChoice = labeled(selection, '物体', selectInput());
   const entitySummary = document.createElement('div');
   entitySummary.className = 'god-sandbox-summary';
   selection.append(entitySummary);
-  const componentChoice = labeled(selection, 'Component', selectInput());
-  const partChoice = labeled(selection, 'Part', selectInput());
-  const connectionChoice = labeled(selection, 'Connection', selectInput());
+  const componentChoice = labeled(selection, '结构组件', selectInput());
+  const partChoice = labeled(selection, '部件（Part）', selectInput());
+  const connectionChoice = labeled(selection, '连接（Connection）', selectInput());
   const structureSummary = document.createElement('div');
   structureSummary.className = 'god-sandbox-summary';
-  selection.append(structureSummary);
+  advanced.append(structureSummary);
 
-  const partEditor = fieldset(root, 'Part edit');
-  const partMaterial = labeled(partEditor, 'Material id', textInput());
-  const partMass = labeled(partEditor, 'Mass', numberInput());
-  const partGeometryKind = labeled(partEditor, 'Geometry', selectInput());
-  for (const kind of ['box', 'sphere', 'capsule', 'convex'] as const) addOption(partGeometryKind, kind, kind);
+  const partEditor = fieldset(editGroup, '编辑部件（Part）');
+  hint(partEditor, '添加部件：给当前物体增加一个新的物理部件。');
+  const partMaterial = labeled(advanced, '材料内部编号（高级）', textInput());
+  const partMass = labeled(partEditor, '质量', numberInput());
+  const partGeometryKind = labeled(partEditor, '形状', selectInput());
+  for (const [kind, label] of [['box', '盒体'], ['sphere', '球体'], ['capsule', '胶囊体'], ['convex', '凸包']] as const) addOption(partGeometryKind, kind, label);
   const geometryDimensions = document.createElement('div');
   geometryDimensions.className = 'god-sandbox-row';
-  const geometryA = labeled(geometryDimensions, 'A', numberInput());
-  const geometryB = labeled(geometryDimensions, 'B', numberInput());
-  const geometryC = labeled(geometryDimensions, 'C', numberInput());
+  const geometryA = labeled(geometryDimensions, '尺寸 X / 半径', numberInput());
+  const geometryB = labeled(geometryDimensions, '尺寸 Y / 半高', numberInput());
+  const geometryC = labeled(geometryDimensions, '尺寸 Z', numberInput());
   partEditor.append(geometryDimensions);
-  const convexPoints = labeled(partEditor, 'Convex points', textInput());
+  const convexPoints = labeled(advanced, '凸形顶点数据（高级）', textInput());
   const partJson = document.createElement('textarea');
-  partJson.setAttribute('aria-label', 'Selected Part JSON');
-  partEditor.append(partJson);
+  partJson.setAttribute('aria-label', '选中部件 JSON（高级）');
+  const partJsonDetails = document.createElement('details');
+  const partJsonSummary = document.createElement('summary');
+  partJsonSummary.textContent = '部件原始 JSON（高级）';
+  partJsonDetails.append(partJsonSummary, partJson);
+  advanced.append(partJsonDetails);
   const partActions = document.createElement('div');
   partActions.className = 'god-sandbox-actions';
   partEditor.append(partActions);
-  const applyPartButton = button(partActions, 'Apply quick edit', () => run('Part updated', () => {
+  const applyPartButton = button(partActions, '应用部件修改', () => run('部件已更新', () => {
     const entityId = requireEntity();
     const part = requirePart();
     const geometry = selectedGeometry(part, partGeometryKind.value as Geometry['kind'], geometryA.value, geometryB.value, geometryC.value, convexPoints.value);
     construction.updatePart(entityId, {
       ...part,
       materialId: partMaterial.value.trim(),
-      mass: partMass.value.trim() === '' ? undefined : parsePositive(partMass.value, 'Mass'),
+      mass: partMass.value.trim() === '' ? undefined : parsePositive(partMass.value, '质量'),
       geometry,
     });
   }, true));
-  button(partActions, 'Apply Part JSON', () => run('Part JSON applied', () => {
+  button(partJsonDetails, '应用部件 JSON', () => run('已应用部件 JSON', () => {
     const entityId = requireEntity();
     const parsed: unknown = JSON.parse(partJson.value);
-    if (!parsed || typeof parsed !== 'object') throw new Error('Part JSON must be an object');
+    if (!parsed || typeof parsed !== 'object') throw new Error('部件 JSON 必须是对象');
     construction.updatePart(entityId, parsed as Part);
   }, true));
-  const addPartButton = button(partActions, 'Add box Part', () => run('Part added', () => {
+  const addPartButton = button(partActions, '添加部件', () => run('已添加部件', () => {
     const inspection = requireInspection();
     const materialId = inspection.blueprint.materials[0]?.id;
-    if (!materialId) throw new Error('Blueprint has no Material to use for a new Part');
+    if (!materialId) throw new Error('蓝图中没有可供新部件使用的材料');
     construction.addPart(requireEntity(), {
       id: makeId('part', inspection.blueprint.parts.map((part) => part.id)),
       materialId,
@@ -386,19 +478,20 @@ export function mountGodSandboxPanel(
       mass: 1,
     });
   }, true));
-  const removePartButton = button(partActions, 'Remove Part', () => run('Part removed', () => construction.removePart(requireEntity(), requirePart().id), true));
+  const removePartButton = button(partActions, '删除部件', () => run('已删除部件', () => construction.removePart(requireEntity(), requirePart().id), true));
 
-  const connections = fieldset(root, 'Connections and structure');
+  const connections = fieldset(editGroup, '连接两个部件');
+  hint(connections, '连接：把两个部件用物理连接固定在一起。');
   const connectionEndpoints = document.createElement('div');
   connectionEndpoints.className = 'god-sandbox-row';
-  const connectionFrom = labeled(connectionEndpoints, 'From', selectInput());
-  const connectionTo = labeled(connectionEndpoints, 'To', selectInput());
-  button(connectionEndpoints, 'Add rigid', () => run('Rigid connection added', () => {
+  const connectionFrom = labeled(connectionEndpoints, '部件一', selectInput());
+  const connectionTo = labeled(connectionEndpoints, '部件二', selectInput());
+  button(connectionEndpoints, '连接部件', () => run('已连接部件', () => {
     const inspection = requireInspection();
     const from = inspection.blueprint.parts.find((part) => part.id === connectionFrom.value);
     const to = inspection.blueprint.parts.find((part) => part.id === connectionTo.value);
-    if (!from || !to) throw new Error('Choose two Parts for a connection');
-    if (from.id === to.id) throw new Error('A connection needs two different Parts');
+    if (!from || !to) throw new Error('请选择两个部件');
+    if (from.id === to.id) throw new Error('连接需要选择两个不同的部件');
     construction.addConnection(requireEntity(), buildRigidConnection(
       makeId('connection', inspection.blueprint.connections.map((connection) => connection.id)), from, to,
     ));
@@ -407,46 +500,52 @@ export function mountGodSandboxPanel(
   const connectionActions = document.createElement('div');
   connectionActions.className = 'god-sandbox-actions';
   connections.append(connectionActions);
-  const detachButton = button(connectionActions, 'Detach', () => run('Connection detached', () => construction.detach(requireEntity(), requireConnectionId()), true));
-  const reattachButton = button(connectionActions, 'Reattach', () => run('Connection reattached', () => construction.reattach(requireEntity(), requireConnectionId()), true));
-  const removeConnectionButton = button(connectionActions, 'Remove connection', () => run('Connection removed', () => construction.removeConnection(requireEntity(), requireConnectionId()), true));
-  const repairConnectionButton = button(connectionActions, 'Repair connection', () => run('Connection repaired', () => construction.repair(requireEntity(), requireConnectionId())));
-  button(connectionActions, 'Repair all', () => run('Structure repaired', () => construction.repair(requireEntity())));
+  const detachButton = button(connectionActions, '拆开连接', () => run('已拆开连接', () => construction.detach(requireEntity(), requireConnectionId()), true));
+  const reattachButton = button(connectionActions, '重新连接', () => run('已重新连接', () => construction.reattach(requireEntity(), requireConnectionId()), true));
+  const removeConnectionButton = button(connectionActions, '删除连接', () => run('已删除连接', () => construction.removeConnection(requireEntity(), requireConnectionId()), true));
+  const repairConnectionButton = button(connectionActions, '修复此连接', () => run('已修复连接', () => construction.repair(requireEntity(), requireConnectionId())));
+  button(connectionActions, '修复整个结构', () => run('结构已修复', () => construction.repair(requireEntity())));
   const connectionInspection = document.createElement('pre');
   connectionInspection.className = 'god-sandbox-summary';
-  connections.append(connectionInspection);
+  const connectionDebug = document.createElement('details');
+  const connectionDebugSummary = document.createElement('summary');
+  connectionDebugSummary.textContent = '连接内部状态（高级）';
+  connectionDebug.append(connectionDebugSummary, connectionInspection);
+  advanced.append(connectionDebug);
 
-  const impact = fieldset(root, 'Impact and repair');
+  const impact = fieldset(impactGroup, '施加作用与修复');
+  hint(impact, '施加冲击：给选中部件一个瞬间外力，用于测试损伤和结构变化。');
   const impulseRow = document.createElement('div');
   impulseRow.className = 'god-sandbox-row';
-  const impulseX = labeled(impulseRow, 'Impulse X', numberInput('0'));
-  const impulseY = labeled(impulseRow, 'Y', numberInput('0'));
-  const impulseZ = labeled(impulseRow, 'Z', numberInput('1'));
+  const impulseX = labeled(impulseRow, '冲击 X', numberInput('0'));
+  const impulseY = labeled(impulseRow, '冲击 Y', numberInput('0'));
+  const impulseZ = labeled(impulseRow, '冲击 Z', numberInput('1'));
   impact.append(impulseRow);
-  const impactButton = button(impact, 'Apply impact to selected Part', () => run('Impact applied', () => {
+  const impactButton = button(impact, '对选中部件施加冲击', () => run('已施加冲击', () => {
     const componentId = selectedValue(componentChoice);
-    if (!componentId) throw new Error('Choose a structural Component');
+    if (!componentId) throw new Error('请选择结构组件');
     const partId = selectedValue(partChoice);
-    if (!partId) throw new Error('Choose a Part');
+    if (!partId) throw new Error('请选择部件');
     construction.applyImpact(componentId, partId, {
-      x: parseNumber(impulseX.value, 'Impulse X'),
-      y: parseNumber(impulseY.value, 'Impulse Y'),
-      z: parseNumber(impulseZ.value, 'Impulse Z'),
+      x: parseNumber(impulseX.value, '冲击 X'),
+      y: parseNumber(impulseY.value, '冲击 Y'),
+      z: parseNumber(impulseZ.value, '冲击 Z'),
     });
   }));
-  const repairPartButton = button(impact, 'Repair selected Part', () => run('Part repaired', () => construction.repair(requireEntity(), requirePart().id)));
+  const repairPartButton = button(impact, '修复选中部件', () => run('部件已修复', () => construction.repair(requireEntity(), requirePart().id)));
 
-  const attachments = fieldset(root, 'Actuators and sensors');
-  const actuatorChoice = labeled(attachments, 'Actuator', selectInput());
+  const attachments = fieldset(editGroup, '执行器与传感器');
+  hint(attachments, '执行器让连接产生力或扭矩；传感器安装在部件上。');
+  const actuatorChoice = labeled(attachments, '执行器（Actuator）', selectInput());
   const actuatorActions = document.createElement('div');
   actuatorActions.className = 'god-sandbox-actions';
   attachments.append(actuatorActions);
-  const addActuatorButton = button(actuatorActions, 'Add actuator to Connection', () => run('Actuator added', () => {
+  const addActuatorButton = button(actuatorActions, '为连接添加执行器', () => run('已添加执行器', () => {
     const inspection = requireInspection();
     const connectionId = requireConnectionId();
     const connection = inspection.blueprint.connections.find((entry) => entry.id === connectionId);
     if (!connection || (connection.kind !== 'revolute' && connection.kind !== 'prismatic')) {
-      throw new Error('Actuators require a revolute or prismatic Connection');
+      throw new Error('执行器需要安装在旋转或滑动连接上');
     }
     construction.addActuator(requireEntity(), {
       id: makeId('actuator', (inspection.blueprint.actuators ?? []).map((actuator) => actuator.id)),
@@ -455,16 +554,16 @@ export function mountGodSandboxPanel(
       responseTimeSeconds: 0.1,
     });
   }, true));
-  const removeActuatorButton = button(actuatorActions, 'Remove actuator', () => run('Actuator removed', () => {
+  const removeActuatorButton = button(actuatorActions, '删除执行器', () => run('已删除执行器', () => {
     const actuatorId = selectedValue(actuatorChoice);
-    if (!actuatorId) throw new Error('Choose an Actuator');
+    if (!actuatorId) throw new Error('请选择执行器');
     construction.removeActuator(requireEntity(), actuatorId);
   }, true));
-  const sensorChoice = labeled(attachments, 'Sensor', selectInput());
+  const sensorChoice = labeled(attachments, '传感器（Sensor）', selectInput());
   const sensorActions = document.createElement('div');
   sensorActions.className = 'god-sandbox-actions';
   attachments.append(sensorActions);
-  const addSensorButton = button(sensorActions, 'Add range sensor to Part', () => run('Sensor added', () => {
+  const addSensorButton = button(sensorActions, '为部件添加距离传感器', () => run('已添加传感器', () => {
     const inspection = requireInspection();
     const partId = requirePart().id;
     construction.addSensor(requireEntity(), {
@@ -481,39 +580,40 @@ export function mountGodSandboxPanel(
       resolution: 5,
     });
   }, true));
-  const removeSensorButton = button(sensorActions, 'Remove sensor', () => run('Sensor removed', () => {
+  const removeSensorButton = button(sensorActions, '删除传感器', () => run('已删除传感器', () => {
     const sensorId = selectedValue(sensorChoice);
-    if (!sensorId) throw new Error('Choose a Sensor');
+    if (!sensorId) throw new Error('请选择传感器');
     construction.removeSensor(requireEntity(), sensorId);
   }, true));
 
-  const blueprintEditor = fieldset(root, 'Blueprint JSON');
+  const blueprintEditor = fieldset(advanced, '蓝图（Blueprint）JSON');
   const blueprintJson = document.createElement('textarea');
-  blueprintJson.setAttribute('aria-label', 'Blueprint JSON');
+  blueprintJson.setAttribute('aria-label', '蓝图（Blueprint）JSON');
   blueprintEditor.append(blueprintJson);
   const blueprintActions = document.createElement('div');
   blueprintActions.className = 'god-sandbox-actions';
   blueprintEditor.append(blueprintActions);
-  button(blueprintActions, 'Validate JSON', () => {
+  button(blueprintActions, '检查 JSON', () => {
     try {
-      const blueprint = parseBlueprintJson();
-      const errors = construction.validate(blueprint);
+      const parsed: unknown = JSON.parse(blueprintJson.value);
+      if (!parsed || typeof parsed !== 'object') throw new Error('蓝图 JSON 必须是对象');
+      const errors = construction.validate(parsed as Blueprint).map(localizeValidationError);
       validationErrors.textContent = errors.join('\n');
       validationErrors.hidden = errors.length === 0;
-      setStatus(errors.length ? errors.join('\n') : 'Blueprint is valid', errors.length > 0);
+      setStatus(errors.length ? `蓝图检查未通过：${errors.join('；')}` : '蓝图格式正确', errors.length > 0);
     } catch (error) {
       validationErrors.textContent = formatError(error);
       validationErrors.hidden = false;
       setStatus(formatError(error), true);
     }
   });
-  button(blueprintActions, 'Save selected', () => run('Blueprint saved to editor', () => {
+  button(blueprintActions, '保存当前物体蓝图', () => run('蓝图已载入编辑区', () => {
     blueprintJson.value = construction.saveBlueprint(requireEntity());
   }, true));
-  button(blueprintActions, 'Apply to selected', () => run('Blueprint applied', () => {
+  button(blueprintActions, '应用到当前物体', () => run('已应用蓝图', () => {
     construction.replaceBlueprint(requireEntity(), parseBlueprintJson());
   }, true));
-  button(blueprintActions, 'Load as new Entity', () => run('Blueprint loaded as new Entity', () => {
+  button(blueprintActions, '作为新物体载入', () => run('已从蓝图生成新物体', () => {
     const blueprint = parseBlueprintJson();
     const entity: Entity = {
       id: nextSandboxEntityId('sandbox-import'),
@@ -536,10 +636,10 @@ export function mountGodSandboxPanel(
   const inspectionDetails = document.createElement('details');
   inspectionDetails.className = 'god-sandbox-collapsed';
   const inspectionSummary = document.createElement('summary');
-  inspectionSummary.textContent = 'Inspection JSON';
+  inspectionSummary.textContent = '完整检查数据 JSON';
   const inspectionJson = document.createElement('pre');
   inspectionDetails.append(inspectionSummary, inspectionJson);
-  root.append(inspectionDetails);
+  advanced.append(inspectionDetails);
 
   function setStatus(message: string, error = false): void {
     status.textContent = message;
@@ -547,7 +647,7 @@ export function mountGodSandboxPanel(
   }
 
   function requireEntity(): string {
-    if (!selectedEntityId) throw new Error('Choose an Entity');
+    if (!selectedEntityId) throw new Error('请先选择物体');
     return selectedEntityId;
   }
 
@@ -557,21 +657,21 @@ export function mountGodSandboxPanel(
 
   function requirePart(): Part {
     const part = requireInspection().blueprint.parts.find((entry) => entry.id === selectedPartId);
-    if (!part) throw new Error('Choose a Part');
+    if (!part) throw new Error('请选择部件');
     return part;
   }
 
   function requireConnectionId(): string {
-    if (!selectedConnectionId) throw new Error('Choose a Connection');
+    if (!selectedConnectionId) throw new Error('请选择连接');
     return selectedConnectionId;
   }
 
   function parseBlueprintJson(): Blueprint {
     const parsed: unknown = JSON.parse(blueprintJson.value);
-    if (!parsed || typeof parsed !== 'object') throw new Error('Blueprint JSON must be an object');
+    if (!parsed || typeof parsed !== 'object') throw new Error('蓝图 JSON 必须是对象');
     const blueprint = parsed as Blueprint;
     const errors = construction.validate(blueprint);
-    if (errors.length) throw new Error(errors.join('; '));
+    if (errors.length) throw new Error(errors.map(localizeValidationError).join('；'));
     return blueprint;
   }
 
@@ -595,8 +695,8 @@ export function mountGodSandboxPanel(
     const entities = world.listEntities();
     if (!entities.some((entity) => entity.id === selectedEntityId)) selectedEntityId = entities[0]?.id;
     entityChoice.textContent = '';
-    if (entities.length === 0) addOption(entityChoice, '', 'No entities');
-    for (const entity of entities) addOption(entityChoice, entity.id, `${entity.id} · ${entity.blueprintId}`, entity.id === selectedEntityId);
+    if (entities.length === 0) addOption(entityChoice, '', '当前世界没有物体');
+    for (const [index, entity] of entities.entries()) addOption(entityChoice, entity.id, `${friendlyBlueprintName(entity.blueprintId)} ${index + 1}`, entity.id === selectedEntityId);
   }
 
   function renderInspection(): void {
@@ -609,7 +709,7 @@ export function mountGodSandboxPanel(
       selectedPartId = undefined;
       selectedConnectionId = undefined;
       selectedComponentId = undefined;
-      entitySummary.textContent = 'Select an Entity to inspect its structure.';
+      entitySummary.textContent = '请选择一个物体以查看和编辑结构。';
       structureSummary.textContent = '';
       partJson.value = '';
       if (!blueprintDraftDirty) blueprintJson.value = '';
@@ -630,31 +730,32 @@ export function mountGodSandboxPanel(
     const partOwner = selectedPartId ? components.find((component) => component.partIds.includes(selectedPartId!)) : undefined;
     if (partOwner) selectedComponentId = partOwner.id;
     else if (!components.some((component) => component.id === selectedComponentId)) selectedComponentId = components[0]?.id;
-    entitySummary.textContent = `${entity.id} · ${blueprint.parts.length} Parts · ${blueprint.connections.length} Connections · ${blueprint.actuators?.length ?? 0} Actuators · ${blueprint.sensors?.length ?? 0} Sensors`;
-    structureSummary.textContent = `${renderDamageSummary(inspection.damage)}\n${components.length} structural Component${components.length === 1 ? '' : 's'}${detached.length ? ` · ${detached.length} detached Connection${detached.length === 1 ? '' : 's'}` : ''}`;
+    entitySummary.textContent = `部件 ${blueprint.parts.length} · 连接 ${blueprint.connections.length} · 执行器 ${blueprint.actuators?.length ?? 0} · 传感器 ${blueprint.sensors?.length ?? 0}`;
+    structureSummary.textContent = `${renderDamageSummary(inspection.damage)}\n结构组件 ${components.length}${detached.length ? ` · 已拆开连接 ${detached.length}` : ''}`;
 
     componentChoice.textContent = '';
-    if (components.length === 0) addOption(componentChoice, '', 'No components');
-    for (const component of components) addOption(componentChoice, component.id, `${component.id} · ${component.partIds.join(', ')}`, component.id === selectedComponentId);
+    if (components.length === 0) addOption(componentChoice, '', '无结构组件');
+    for (const [index, component] of components.entries()) addOption(componentChoice, component.id, `组件 ${index + 1}`, component.id === selectedComponentId);
     partChoice.textContent = '';
-    for (const part of blueprint.parts) addOption(partChoice, part.id, part.id, part.id === selectedPartId);
+    for (const [index, part] of blueprint.parts.entries()) addOption(partChoice, part.id, `部件 ${index + 1}`, part.id === selectedPartId);
     connectionChoice.textContent = '';
-    if (allConnections.length === 0) addOption(connectionChoice, '', 'No connections');
+    if (allConnections.length === 0) addOption(connectionChoice, '', '无连接');
     for (const { connection, detached: isDetached } of allConnections) {
-      addOption(connectionChoice, connection.id, `${connection.id}${isDetached ? ' · detached' : ''}`, connection.id === selectedConnectionId);
+      const index = allConnections.findIndex((entry) => entry.connection.id === connection.id);
+      addOption(connectionChoice, connection.id, `连接 ${index + 1}${isDetached ? ' · 已拆开' : ''}`, connection.id === selectedConnectionId);
     }
     connectionFrom.textContent = '';
     connectionTo.textContent = '';
     for (const part of blueprint.parts) {
-      addOption(connectionFrom, part.id, part.id, part.id === blueprint.parts[0]?.id);
-      addOption(connectionTo, part.id, part.id, part.id === blueprint.parts[1]?.id);
+      addOption(connectionFrom, part.id, `部件 ${blueprint.parts.indexOf(part) + 1}`, part.id === blueprint.parts[0]?.id);
+      addOption(connectionTo, part.id, `部件 ${blueprint.parts.indexOf(part) + 1}`, part.id === blueprint.parts[1]?.id);
     }
     actuatorChoice.textContent = '';
-    if (!(blueprint.actuators?.length)) addOption(actuatorChoice, '', 'No actuators');
-    for (const actuator of blueprint.actuators ?? []) addOption(actuatorChoice, actuator.id, `${actuator.id} → ${actuator.connectionId}`);
+    if (!(blueprint.actuators?.length)) addOption(actuatorChoice, '', '无执行器');
+    for (const [index, actuator] of (blueprint.actuators ?? []).entries()) addOption(actuatorChoice, actuator.id, `执行器 ${index + 1}`);
     sensorChoice.textContent = '';
-    if (!(blueprint.sensors?.length)) addOption(sensorChoice, '', 'No sensors');
-    for (const sensor of blueprint.sensors ?? []) addOption(sensorChoice, sensor.id, `${sensor.id} → ${sensor.partId}`);
+    if (!(blueprint.sensors?.length)) addOption(sensorChoice, '', '无传感器');
+    for (const [index, sensor] of (blueprint.sensors ?? []).entries()) addOption(sensorChoice, sensor.id, `传感器 ${index + 1}`);
     if (!blueprintDraftDirty) blueprintJson.value = JSON.stringify(blueprint, null, 2);
     inspectionJson.textContent = JSON.stringify(inspection, null, 2);
     if (!partDraftDirty) renderPartEditor(blueprint);
@@ -662,7 +763,7 @@ export function mountGodSandboxPanel(
     connectionInspection.textContent = selectedConnection
       ? JSON.stringify({ ...selectedConnection.connection, detached: selectedConnection.detached,
         damage: inspection.damage.connections[selectedConnection.connection.id]?.damage ?? null }, null, 2)
-      : 'Select a Connection to inspect its anchors and condition.';
+      : '选择连接后可在高级调试中查看其内部信息。';
     detachButton.disabled = !selectedConnection || selectedConnection.detached;
     reattachButton.disabled = !selectedConnection || !selectedConnection.detached;
     removeConnectionButton.disabled = !selectedConnection || selectedConnection.detached;
@@ -746,7 +847,7 @@ export function mountGodSandboxPanel(
   componentChoice.addEventListener('change', () => { selectedComponentId = selectedValue(componentChoice); renderInspection(); });
 
   function refresh(): void {
-    pauseButton.textContent = world.paused ? 'Resume' : 'Pause';
+    pauseButton.textContent = world.paused ? '继续运行' : '暂停';
     renderEntityOptions();
     renderInspection();
   }
