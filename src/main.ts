@@ -73,19 +73,9 @@ async function main(): Promise<void> {
   renderer.addBox(ground, groundSpec.halfExtents, 0x343b46);
   renderer.setPose(ground, physics.readPose(ground));
 
-  // The platform's range sensor points along +X. This static target makes its
-  // observation visible without making the target a special simulation type.
-  const sensorTargetSpec = {
-    halfExtents: { x: 0.35, y: 0.35, z: 0.35 },
-    position: { x: 1.25, y: 1.05, z: -2.8 },
-    dynamic: false,
-  } as const;
-  const sensorTarget = physics.createBox(sensorTargetSpec);
-  renderer.addBox(sensorTarget, sensorTargetSpec.halfExtents, 0x7d86cd);
-  renderer.setPose(sensorTarget, physics.readPose(sensorTarget));
-
   const world = new WorldRuntime(physics);
   const passiveEntity: Entity = { id: 'entity-passive-object', blueprint: createPassiveObjectBlueprint() };
+  const sensorTargetEntity: Entity = { id: 'entity-sensor-target', blueprint: createPassiveObjectBlueprint() };
   const machineEntity: Entity = { id: 'entity-actuated-machine', blueprint: createActuatedMachineBlueprint() };
   const sensorPlatformEntity: Entity = { id: 'entity-sensor-platform', blueprint: createSensorPlatformBlueprint() };
   const agentEntity: Entity = { id: 'entity-active-agent', blueprint: createActiveBlueprint() };
@@ -168,16 +158,18 @@ async function main(): Promise<void> {
     control: machineControl,
   });
   world.spawn(sensorPlatformEntity, { origin: { x: -0.8, y: 0, z: -2.8 } });
+  world.spawn(sensorTargetEntity, { origin: { x: 1.25, y: 0, z: -2.8 } });
   world.spawn(agentEntity, {
     origin: { x: 0, y: 0, z: 2.4 },
     energy: { availablePowerWatts: 400 },
     agent: { control: agentControl },
   });
 
-  const renderEntries: readonly { entity: Entity; body: PhysicsBody; color: number }[] = [
+  const renderEntries: { entity: Entity; body: PhysicsBody; color: number }[] = [
     { entity: passiveEntity, body: world.getPhysicsBody(passiveEntity.id), color: 0x82cfa6 },
     { entity: machineEntity, body: world.getPhysicsBody(machineEntity.id), color: 0xd19a66 },
     { entity: sensorPlatformEntity, body: world.getPhysicsBody(sensorPlatformEntity.id), color: 0x63c4d7 },
+    { entity: sensorTargetEntity, body: world.getPhysicsBody(sensorTargetEntity.id), color: 0x7d86cd },
     { entity: agentEntity, body: world.getPhysicsBody(agentEntity.id), color: 0x9eb7c9 },
   ];
   for (const { entity, body, color } of renderEntries) {
@@ -232,20 +224,22 @@ async function main(): Promise<void> {
   resetButton.addEventListener('click', () => location.reload());
   controls.append(resetButton);
 
-  const projectiles: number[] = [];
+  let nextImpactEntityId = 1;
   const impactButton = document.createElement('button');
   impactButton.textContent = 'External impact';
   impactButton.addEventListener('click', () => {
     const corePose = world.readPartPose(agentId, 'part-core');
-    const spec = {
-      halfExtents: { x: 0.3, y: 0.3, z: 0.3 },
-      position: { x: corePose.position.x, y: corePose.position.y, z: corePose.position.z - 3 },
-      dynamic: true,
-    } as const;
-    const handle = physics.createBox(spec);
+    const entity: Entity = {
+      id: `entity-impact-${nextImpactEntityId++}`,
+      blueprint: createPassiveObjectBlueprint({ halfExtents: { x: 0.3, y: 0.3, z: 0.3 }, mass: 0.3 }),
+    };
+    world.spawn(entity, { origin: { x: corePose.position.x, y: corePose.position.y - 0.3, z: corePose.position.z - 3 } });
+    const body = world.getPhysicsBody(entity.id);
+    const handle = body.partHandles.get('passive-object-body');
+    if (handle === undefined) throw new Error(`Missing impact Part: ${entity.id}`);
     physics.applyImpulse(handle, { x: 0, y: 0, z: 1.5 });
-    renderer.addBox(handle, spec.halfExtents, 0xea6f65);
-    projectiles.push(handle);
+    renderer.addPart(handle, entity.blueprint.parts[0].geometry, 0xea6f65);
+    renderEntries.push({ entity, body, color: 0xea6f65 });
   });
   controls.append(impactButton);
 
@@ -286,8 +280,6 @@ async function main(): Promise<void> {
         renderer.setPose(handle, body.readPartPose(part.id));
       }
     }
-    for (const handle of projectiles) renderer.setPose(handle, physics.readPose(handle));
-
     const agentBody = world.getPhysicsBody(agentId);
     const rootPose = agentBody.readPartPose('part-core');
     const root = rootPose.position;

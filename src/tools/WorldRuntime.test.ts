@@ -6,6 +6,23 @@ import { createPassiveBlueprint } from './smokeScene';
 import { createActuatedMachineBlueprint, createPassiveObjectBlueprint, createSensorPlatformBlueprint } from './worldFixtures';
 
 describe('WorldRuntime', () => {
+  it('keeps a sensor target inside Entity lifecycle and observable after settling', async () => {
+    const physics = await RapierPhysicsAdapter.create();
+    physics.createBox({
+      halfExtents: { x: 8, y: 0.1, z: 8 }, position: { x: 0, y: -0.1, z: 0 }, dynamic: false,
+    });
+    const world = new WorldRuntime(physics);
+    world.spawn({ id: 'platform', blueprint: createSensorPlatformBlueprint() });
+    world.spawn({ id: 'target', blueprint: createPassiveObjectBlueprint() }, { origin: { x: 2, y: 0, z: 0 } });
+    for (let tick = 0; tick < 120; tick += 1) world.stepOnce();
+    expect(world.listEntities().map((entity) => entity.id)).toEqual(['platform', 'target']);
+    expect(world.readObservations('platform').some((observation) => observation.channel === 'range')).toBe(true);
+    world.removeEntity('target');
+    world.stepOnce();
+    expect(world.listEntities().map((entity) => entity.id)).toEqual(['platform']);
+    expect(world.readObservations('platform').some((observation) => observation.channel === 'range')).toBe(false);
+  });
+
   it('runs passive, actuated, sensor-only, and Agent compositions in one world', async () => {
     const physics = await RapierPhysicsAdapter.create();
     const world = new WorldRuntime(physics);

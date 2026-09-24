@@ -25,7 +25,11 @@ function pose(x: number, y: number, z: number): Pose {
  * The pose is local to the Blueprint. A WorldRuntime can place several
  * instances by supplying different origins when constructing their bodies.
  */
-export function createPassiveObjectBlueprint(): Blueprint {
+export function createPassiveObjectBlueprint(options: {
+  readonly halfExtents?: Vector3;
+  readonly mass?: number;
+} = {}): Blueprint {
+  const halfExtents = options.halfExtents ?? vector(0.65, 0.5, 0.65);
   const material: Material = {
     id: 'passive-object-material',
     density: 650,
@@ -35,9 +39,9 @@ export function createPassiveObjectBlueprint(): Blueprint {
   const body: Part = {
     id: 'passive-object-body',
     materialId: material.id,
-    geometry: { kind: 'box', halfExtents: vector(0.65, 0.5, 0.65) },
-    pose: pose(0, 0.5, 0),
-    mass: 3,
+    geometry: { kind: 'box', halfExtents },
+    pose: pose(0, halfExtents.y, 0),
+    mass: options.mass ?? 3,
   };
 
   return {
@@ -124,7 +128,7 @@ export function createSensorPlatformBlueprint(): Blueprint {
     id: 'sensor-platform-range',
     kind: 'range',
     partId: platform.id,
-    localPose: pose(0, 0.55, 0),
+    localPose: pose(0, 0.45, 0),
     forward: vector(1, 0, 0),
     updatePeriodTicks: 1,
     noise: { standardDeviation: 0 },
