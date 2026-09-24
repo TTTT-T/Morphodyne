@@ -42,4 +42,4 @@ A separate two-Part WorldRuntime case has no Connection. The 20 N actuator still
 
 Phase 9's connection load is a momentum-balance approximation, not an exact Rapier joint reaction; simultaneous contacts and multi-joint load attribution remain approximate. The tension model omits passive cable elasticity, slack hysteresis, stored energy, regeneration, and fatigue. The God Sandbox form still creates Joint Actuators; Tension Actuators can be loaded or saved as validated Blueprint JSON and manipulated through ConstructionRuntime. Windows-specific validation was not performed; the primary acceptance evidence uses the Mac Rapier runtime.
 
-Review branch: `codex/phase-10-tension-actuator`, targeting `main`. Commit and pull-request metadata will be added at handoff.
+Review branch: `codex/phase-10-tension-actuator`, targeting `main`. Implementation and validation commit: `0f192c9`. Review pull request: [#15](https://github.com/TTTT-T/Morphodyne/pull/15). This PR metadata is a follow-up documentation commit on the same branch.
