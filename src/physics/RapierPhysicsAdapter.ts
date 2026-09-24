@@ -180,7 +180,8 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
   private readonly activeRuntimeBodies = new Set<RuntimePhysicsBody>();
   private readonly partRuntimeReferences = new Map<BodyHandle, PartRuntimeReference>();
   private readonly colliderRuntimeReferences = new Map<number, PartRuntimeReference>();
-  private readonly actuatedBodies = new Set<RAPIER.RigidBody>();
+  private readonly stepScopedForceBodies = new Set<RAPIER.RigidBody>();
+  private readonly staticWorldBoxHandles = new Set<BodyHandle>();
   private nextHandle = 1;
 
   static async create(): Promise<RapierPhysicsAdapter> {
@@ -192,15 +193,30 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     const { x, y, z } = spec.halfExtents;
     if (![x, y, z].every((value) => Number.isFinite(value) && value > 0)) throw new Error('Box half extents must be positive and finite');
     if (!Object.values(spec.position).every(Number.isFinite)) throw new Error('Box position must be finite');
+    const rotation = spec.rotation ?? { x: 0, y: 0, z: 0, w: 1 };
+    if (![rotation.x, rotation.y, rotation.z, rotation.w].every(Number.isFinite)) throw new Error('Box rotation must be finite');
+    const rotationMagnitude = Math.hypot(rotation.x, rotation.y, rotation.z, rotation.w);
+    if (rotationMagnitude === 0) throw new Error('Box rotation must be non-zero');
+    if (spec.friction !== undefined && (!Number.isFinite(spec.friction) || spec.friction < 0)) {
+      throw new Error('Box friction must be non-negative and finite');
+    }
     const descriptor = spec.dynamic ? RAPIER.RigidBodyDesc.dynamic() : RAPIER.RigidBodyDesc.fixed();
-    descriptor.setTranslation(spec.position.x, spec.position.y, spec.position.z);
+    descriptor.setTranslation(spec.position.x, spec.position.y, spec.position.z)
+      .setRotation({
+        x: rotation.x / rotationMagnitude,
+        y: rotation.y / rotationMagnitude,
+        z: rotation.z / rotationMagnitude,
+        w: rotation.w / rotationMagnitude,
+      });
     const body = this.world.createRigidBody(descriptor);
     const collider = RAPIER.ColliderDesc.cuboid(x, y, z);
+    if (spec.friction !== undefined) collider.setFriction(spec.friction);
     collider.setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
       .setContactForceEventThreshold(0);
     this.world.createCollider(collider, body);
     const handle = this.nextHandle++;
     this.bodies.set(handle, body);
+    if (!spec.dynamic) this.staticWorldBoxHandles.add(handle);
     return handle;
   }
 
@@ -340,7 +356,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       const collider = runtimeBody.partColliders.get(partId);
       if (collider) this.colliderRuntimeReferences.delete(collider.handle);
       this.partRuntimeReferences.delete(handle);
-      this.actuatedBodies.delete(part);
+      this.stepScopedForceBodies.delete(part);
       runtimeBody.partColliders.delete(partId);
       runtimeBody.latestPartImpulses.delete(partId);
       runtimeBody.pendingPartImpulses.delete(partId);
@@ -377,6 +393,22 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
         (reference.runtimeBody.pendingPartImpulses.get(reference.partId) ?? 0) + magnitude,
       );
     }
+  }
+
+  applyForce(handle: BodyHandle, force: Vector3): void {
+    if (![force.x, force.y, force.z].every(Number.isFinite)) throw new Error('Force must be finite');
+    const body = this.bodies.get(handle);
+    if (!body) throw new Error(`Unknown body handle: ${handle}`);
+    body.addForce(force, true);
+    this.stepScopedForceBodies.add(body);
+  }
+
+  setBoxFriction(handle: BodyHandle, friction: number): void {
+    if (!Number.isFinite(friction) || friction < 0) throw new Error('Box friction must be non-negative and finite');
+    if (!this.staticWorldBoxHandles.has(handle)) throw new Error(`Unknown static world box handle: ${handle}`);
+    const body = this.bodies.get(handle);
+    if (!body) throw new Error(`Unknown static world box handle: ${handle}`);
+    body.collider(0).setFriction(friction);
   }
 
   applyTorqueImpulse(handle: BodyHandle, torque: Vector3): void {
@@ -464,8 +496,8 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       connection.from.addTorque(negate(effort), true);
       connection.to.addTorque(effort, true);
     }
-    this.actuatedBodies.add(connection.from);
-    this.actuatedBodies.add(connection.to);
+    this.stepScopedForceBodies.add(connection.from);
+    this.stepScopedForceBodies.add(connection.to);
   }
 
   readJointVelocity(body: PhysicsBody, connectionId: string): number {
@@ -574,14 +606,14 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       }
       runtimeBody.pendingPartImpulses.clear();
     }
-    // Rapier user forces and torques persist until reset. Outputs are scoped
-    // to the step for which the controller submitted them, so clear only the
-    // bodies touched by joint outputs after integration.
-    for (const body of this.actuatedBodies) {
+    // Rapier user forces and torques persist until reset. Controller outputs
+    // and explicit force requests are scoped to this step, so clear the bodies
+    // they touched after integration.
+    for (const body of this.stepScopedForceBodies) {
       body.resetForces(false);
       body.resetTorques(false);
     }
-    this.actuatedBodies.clear();
+    this.stepScopedForceBodies.clear();
   }
 
   readPose(handle: BodyHandle): Pose {
@@ -593,5 +625,12 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       position: { x: position.x, y: position.y, z: position.z },
       rotation: { x: rotation.x, y: rotation.y, z: rotation.z, w: rotation.w },
     };
+  }
+
+  readLinearVelocity(handle: BodyHandle): Vector3 {
+    const body = this.bodies.get(handle);
+    if (!body) throw new Error(`Unknown body handle: ${handle}`);
+    const velocity = body.linvel();
+    return { x: velocity.x, y: velocity.y, z: velocity.z };
   }
 }
