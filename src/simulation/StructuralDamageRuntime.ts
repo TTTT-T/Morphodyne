@@ -1,4 +1,4 @@
-import { applyConnectionLoad, createDamageState, type DamageEvent, type StructuralDamageState } from '../core/damage';
+import { applyConnectionLoad, applyPartLoad, createDamageState, type DamageEvent, type StructuralDamageState } from '../core/damage';
 import type { Blueprint } from '../core/model';
 import type { PhysicsAdapter } from '../physics/PhysicsAdapter';
 import type { PhysicsBody } from '../physics/PhysicsBody';
@@ -8,6 +8,7 @@ export class StructuralDamageRuntime {
   private current: StructuralDamageState;
   private readonly incidentConnections = new Map<string, readonly string[]>();
   private readonly retiredParts = new Set<string>();
+  private readonly previousContactImpulse = new Map<string, number>();
 
   constructor(
     private readonly blueprint: Blueprint,
@@ -30,17 +31,31 @@ export class StructuralDamageRuntime {
     for (const partId of partIds) this.retiredParts.add(partId);
   }
 
-  /**
-   * A first-order load path: an impacted Part shares its measured impulse
-   * equally among its remaining structural connections. Rapier still decides
-   * how every rigid body actually moves; the Core decides when a path fails.
-   */
+  /** Route external contact to Part material, internal reaction to Connections. */
   afterPhysicsStep(tick: number, seconds = 1 / 60): readonly DamageEvent[] {
     if (!Number.isFinite(seconds) || seconds <= 0) throw new RangeError('Damage step must be positive and finite');
     const events: DamageEvent[] = [];
     for (const part of this.blueprint.parts) {
       if (this.retiredParts.has(part.id)) continue;
-      const impulseNs = this.physics.readPartImpactImpulse(this.body, part.id);
+      const contact = this.physics.readPartContactLoad(this.body, part.id);
+      const previous = this.previousContactImpulse.get(part.id) ?? 0;
+      this.previousContactImpulse.set(part.id, contact.impulseNs);
+      // Only a rising contact impulse enters the transient channel. A steady
+      // support reaction enters the sustained-force integral once per step.
+      if (contact.impulseNs > 0 || contact.forceN > 0) {
+        const result = applyPartLoad(this.current, this.blueprint, {
+          partId: part.id, impulseNs: Math.max(0, contact.impulseNs - previous),
+          forceN: contact.forceN, seconds, tick,
+        });
+        this.current = result.state;
+        events.push(...result.events);
+        for (const event of result.events) if (event.target === 'connection' && event.kind === 'separation' && event.connectionId) {
+          this.physics.breakConnection(this.body, event.connectionId);
+        }
+      }
+      // Preserve the earlier explicit-impulse structural experiment path.
+      // Contact impulses have already gone through Part and are excluded here.
+      const impulseNs = this.physics.readPartAppliedImpulse(this.body, part.id);
       if (impulseNs <= 0) continue;
       const connected = (this.incidentConnections.get(part.id) ?? [])
         .filter((id) => this.current.connections[id]?.connected);
@@ -53,7 +68,7 @@ export class StructuralDamageRuntime {
         this.current = result.state;
         events.push(...result.events);
         for (const event of result.events) {
-          if (event.target === 'connection' && event.kind === 'separation') {
+          if (event.target === 'connection' && event.kind === 'separation' && event.connectionId) {
             this.physics.breakConnection(this.body, event.connectionId);
           }
         }
@@ -66,12 +81,12 @@ export class StructuralDamageRuntime {
       const { forceN, torqueNm } = this.physics.readConnectionLoad(this.body, connection.id);
       if (forceN <= 0 && torqueNm <= 0) continue;
       const result = applyConnectionLoad(this.current, this.blueprint, {
-        connectionId: connection.id, impulseNs: 0, forceN, torqueNm, seconds, tick,
+        connectionId: connection.id, impulseNs: 0, forceN, torqueNm, seconds, tick, loadEndpoints: false,
       });
       this.current = result.state;
       events.push(...result.events);
       for (const event of result.events) {
-        if (event.target === 'connection' && event.kind === 'separation') {
+        if (event.target === 'connection' && event.kind === 'separation' && event.connectionId) {
           this.physics.breakConnection(this.body, event.connectionId);
         }
       }

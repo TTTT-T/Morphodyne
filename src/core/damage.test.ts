@@ -3,6 +3,7 @@ import type { Blueprint, Material, Pose } from './model';
 import { validateBlueprint } from './model';
 import {
   applyConnectionLoad,
+  applyPartLoad,
   createDamageState,
   getConnectionLoadCapacity,
   getConnectionState,
@@ -59,6 +60,45 @@ function load(strengthImpulseNs: number, impulseNs: number, state = createDamage
 }
 
 describe('structural damage core', () => {
+  it('damages a connectionless Part from direct measured load and leaves omitted capacities compatible', () => {
+    const single: Blueprint = { ...blueprint(20), parts: [blueprint(20).parts[0]], connections: [] };
+    const initial = createDamageState(single);
+    const low = applyPartLoad(initial, single, { partId: 'from', impulseNs: 8, tick: 1 });
+    expect(low.state.parts.from.damage.state).toBe('intact');
+    const high = applyPartLoad(low.state, single, { partId: 'from', impulseNs: 101, tick: 2 });
+    expect(high.state.parts.from.damage.state).toBe('fractured');
+    expect(high.events).toContainEqual(expect.objectContaining({ target: 'part', kind: 'fracture', partId: 'from' }));
+    const legacy = { ...single, materials: [{ ...material, yieldImpulseNs: undefined, toughnessImpulseNs: undefined }] };
+    expect(applyPartLoad(createDamageState(legacy), legacy, { partId: 'from', impulseNs: 1000 }).state.parts.from.damage.state).toBe('intact');
+  });
+
+  it('integrates only measured sustained overload and separates every incident connection on direct fracture', () => {
+    const original = blueprint(1000);
+    const structure: Blueprint = { ...original,
+      materials: [{ ...material, yieldImpulseNs: undefined, toughnessImpulseNs: undefined, yieldForceN: 10, ultimateForceN: 100 }],
+      parts: [...original.parts, { ...original.parts[0], id: 'third' }],
+      connections: [...original.connections, { ...original.connections[0], id: 'other', fromPartId: 'from', toPartId: 'third' }],
+    };
+    let state = createDamageState(structure);
+    for (let i = 0; i < 10; i += 1) state = applyPartLoad(state, structure, { partId: 'from', impulseNs: 0, forceN: 9, seconds: 1 }).state;
+    expect(state.parts.from.damage.state).toBe('intact');
+    const first = applyPartLoad(state, structure, { partId: 'from', impulseNs: 0, forceN: 15, seconds: 1 });
+    expect(first.part.damage.accumulatedOverloadSeconds).toBeCloseTo(0.5);
+    const second = applyPartLoad(first.state, structure, { partId: 'from', impulseNs: 0, forceN: 15, seconds: 1 });
+    expect(second.part.damage.state).toBe('fractured');
+    expect(second.events.filter((event) => event.kind === 'separation')).toHaveLength(2);
+    expect(Object.values(second.state.connections).every((entry) => !entry.connected)).toBe(true);
+  });
+
+  it('keeps external Part damage separate from internal Connection reaction in runtime mode', () => {
+    const structure = blueprint(20);
+    const initial = createDamageState(structure);
+    const contacted = applyPartLoad(initial, structure, { partId: 'from', impulseNs: 12 });
+    const response = applyConnectionLoad(contacted.state, structure, { connectionId: 'link', impulseNs: 12, loadEndpoints: false });
+    expect(response.state.connections.link.damage.state).toBe('degraded');
+    expect(response.state.parts.from.damage.accumulatedImpulseNs).toBe(contacted.part.damage.accumulatedImpulseNs);
+    expect(response.state.parts.to.damage.state).toBe('intact');
+  });
   it('starts intact and leaves a sub-yield impulse unchanged', () => {
     const structure = blueprint(20);
     const initial = createDamageState(structure);
