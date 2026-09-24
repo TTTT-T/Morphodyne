@@ -12,7 +12,7 @@ describe('active body Blueprint', () => {
     expect(blueprint.parts).toHaveLength(14);
     expect(blueprint.connections).toHaveLength(13);
     expect(blueprint.actuators).toHaveLength(13);
-    expect(blueprint.actuators?.map((actuator) => actuator.connectionId)).toEqual(
+    expect(blueprint.actuators?.filter((actuator) => actuator.kind !== 'tension').map((actuator) => actuator.connectionId)).toEqual(
       blueprint.connections.map((connection) => connection.id),
     );
     expect(assemblies).toHaveLength(4);

@@ -32,6 +32,28 @@ function threePartEntity() {
 }
 
 describe('Rapier primitive adapter', () => {
+  it('applies a one-step point force with a physical moment arm', async () => {
+    async function run(height: number) {
+      const physics = await RapierPhysicsAdapter.create();
+      const body = physics.createBox({ halfExtents: { x: 0.3, y: 0.3, z: 0.3 },
+        position: { x: 0, y: 3, z: 0 }, dynamic: true });
+      expect(physics.readWorldPoint(body, { x: 0, y: height, z: 0 })).toEqual({ x: 0, y: 3 + height, z: 0 });
+      physics.applyForceAtPoint(body, { x: 10, y: 0, z: 0 }, { x: 0, y: 3 + height, z: 0 });
+      physics.step(1 / 60);
+      const first = physics.readPose(body).rotation.z;
+      const velocity = physics.readPointVelocity(body, { x: 0, y: height, z: 0 });
+      expect(Object.values(velocity).every(Number.isFinite)).toBe(true);
+      physics.step(1 / 60);
+      return { first, second: physics.readPose(body).rotation.z };
+    }
+    const centered = await run(0);
+    const offset = await run(0.2);
+    expect(Math.abs(centered.first)).toBeLessThan(1e-5);
+    expect(Math.abs(offset.first)).toBeGreaterThan(1e-5);
+    expect(Math.abs(offset.second)).toBeGreaterThan(Math.abs(offset.first));
+    expect(Math.abs(offset.second)).toBeLessThan(Math.abs(offset.first) * 3);
+  });
+
   it('rotates world boxes, updates static world friction, and scopes applied force to one step', async () => {
     const physics = await RapierPhysicsAdapter.create();
     const slope = physics.createBox({

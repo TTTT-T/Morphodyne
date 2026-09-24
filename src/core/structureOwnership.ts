@@ -90,6 +90,16 @@ export function deriveStructuralComponents(
   }
 
   for (const actuator of blueprint.actuators ?? []) {
+    if (actuator.kind === 'tension') {
+      const fromComponent = componentByPartId.get(actuator.fromPartId);
+      const toComponent = componentByPartId.get(actuator.toPartId);
+      // The mounting component owns control. A tensile link can still pull a
+      // separately owned component without redefining structural connectivity.
+      if (fromComponent !== undefined && toComponent !== undefined) {
+        components[fromComponent].actuatorIds.push(actuator.id);
+      }
+      continue;
+    }
     const connection = blueprint.connections.find((candidate) => candidate.id === actuator.connectionId);
     if (!connection || damageState.connections[connection.id]?.connected !== true) continue;
     const fromComponent = componentByPartId.get(connection.fromPartId);

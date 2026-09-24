@@ -40,10 +40,13 @@ async function recordIdenticalSignals(): Promise<readonly (readonly ControlSigna
   for (let tick = 0; tick < TOTAL_TICKS; tick += 1) {
     const intent = tick < IMPACT_TICK ? { forward: 0, turn: 0 } : { forward: 1, turn: 0 };
     const joints = new Map<string, JointFeedback>();
-    for (const joint of blueprint.actuators ?? []) joints.set(joint.id, {
+    for (const joint of blueprint.actuators ?? []) {
+      if (joint.kind === 'tension') continue;
+      joints.set(joint.id, {
       angle: physics.readJointPosition(body, joint.connectionId),
       angularVelocity: physics.readJointVelocity(body, joint.connectionId),
-    });
+      });
+    }
     const signals = controller.update(STEP, body.readPartPose('part-core'), intent, { joints });
     const driveSignals = getActiveBodyAssemblies().map((assembly) => {
       const x = parts.get(assembly.partIds[0])!.pose.position.x;

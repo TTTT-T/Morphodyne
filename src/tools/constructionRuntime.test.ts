@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { TensionActuator } from '../core/actuation';
 import { RapierPhysicsAdapter } from '../physics/RapierPhysicsAdapter';
 import { ConstructionRuntime } from '../simulation/ConstructionRuntime';
 import { WorldRuntime } from '../simulation/WorldRuntime';
@@ -73,6 +74,44 @@ describe('ConstructionRuntime', () => {
     });
     expect(construction.inspect('agent').entity.agentPresent).toBe(true);
     expect(construction.inspect('agent').components.length).toBeGreaterThan(0);
+  });
+
+  it('adds, removes, serializes, and prunes tension actuators by endpoint Parts', async () => {
+    const physics = await RapierPhysicsAdapter.create();
+    const world = new WorldRuntime(physics);
+    const construction = new ConstructionRuntime(world);
+    const machine = createActuatedMachineBlueprint();
+    construction.spawn({ id: 'tension-machine', blueprint: machine });
+
+    const tension: TensionActuator = {
+      id: 'cable-pull', kind: 'tension', fromPartId: 'machine-base', toPartId: 'machine-arm',
+      fromAttachment: { x: 0.2, y: 0.1, z: 0 }, toAttachment: { x: -0.3, y: 0, z: 0.05 },
+      maxOutput: 75, responseTimeSeconds: 0.2,
+    };
+    const temporary: TensionActuator = { ...tension, id: 'temporary-cable' };
+    construction.addActuator('tension-machine', tension);
+    construction.addActuator('tension-machine', temporary);
+
+    const saved = construction.saveBlueprint('tension-machine');
+    expect(construction.loadBlueprint(saved).actuators).toContainEqual(tension);
+    expect(construction.loadBlueprint(saved).actuators).toContainEqual(temporary);
+
+    construction.removeActuator('tension-machine', temporary.id);
+    expect(construction.inspect('tension-machine').blueprint.actuators).toContainEqual(tension);
+    expect(construction.inspect('tension-machine').blueprint.actuators).not.toContainEqual(temporary);
+
+    construction.detach('tension-machine', 'machine-hinge');
+    expect(construction.inspect('tension-machine').blueprint.actuators).toContainEqual(tension);
+    expect(construction.inspect('tension-machine').blueprint.actuators).not.toContainEqual(machine.actuators![0]);
+    construction.reattach('tension-machine', 'machine-hinge');
+    expect(construction.inspect('tension-machine').blueprint.actuators).toContainEqual(tension);
+    expect(construction.inspect('tension-machine').blueprint.actuators).toContainEqual(machine.actuators![0]);
+
+    construction.removeConnection('tension-machine', 'machine-hinge');
+    expect(construction.inspect('tension-machine').blueprint.actuators).toContainEqual(tension);
+
+    construction.removePart('tension-machine', 'machine-arm');
+    expect(construction.inspect('tension-machine').blueprint.actuators).toEqual([]);
   });
 
   it('repairs a physically separated assembly through explicit reconstruction', async () => {

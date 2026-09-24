@@ -90,6 +90,21 @@ describe('Core actuation contract', () => {
     expect(validateBlueprint(prismatic)).toEqual([]);
   });
 
+  it('validates Part-local tension attachments without a Connection dependency', () => {
+    const source = actuatorBlueprint();
+    const tension = { id: 'pull', kind: 'tension' as const, fromPartId: 'base', toPartId: 'link',
+      fromAttachment: { x: 0, y: 0.4, z: 0 }, toAttachment: { x: 0.3, y: 0, z: 0 }, maxOutput: 20 };
+    expect(validateBlueprint({ ...source, connections: [], actuators: [tension] })).toEqual([]);
+    expect(validateBlueprint({ ...source, actuators: [{ ...tension, toPartId: 'missing' }] }))
+      .toContain('Unknown tension actuator endpoint: pull');
+    expect(validateBlueprint({ ...source, actuators: [{ ...tension, toPartId: 'base' }] }))
+      .toContain('Self tension actuator: pull');
+    expect(validateBlueprint({ ...source, actuators: [{ ...tension, fromAttachment: { x: Number.NaN, y: 0, z: 0 } }] }))
+      .toContain('Invalid tension actuator attachment: pull');
+    expect(validateBlueprint({ ...source, actuators: [{ ...tension, maxOutput: 0, responseTimeSeconds: -1 }] }))
+      .toEqual(expect.arrayContaining(['Invalid actuator maxOutput: pull', 'Invalid actuator responseTimeSeconds: pull']));
+  });
+
   it('creates only normalized control signals', () => {
     const signal = createControlSignal('hinge-motor', -1);
     expect(signal).toEqual({ actuatorId: 'hinge-motor', value: -1 });

@@ -570,6 +570,33 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     this.stepScopedForceBodies.add(body);
   }
 
+  applyForceAtPoint(handle: BodyHandle, force: Vector3, point: Vector3): void {
+    if (![force.x, force.y, force.z, point.x, point.y, point.z].every(Number.isFinite)) {
+      throw new Error('Point force and position must be finite');
+    }
+    const body = this.bodies.get(handle);
+    if (!body) throw new Error(`Unknown body handle: ${handle}`);
+    body.addForceAtPoint(force, point, true);
+    const center = body.worldCom();
+    const arm = { x: point.x - center.x, y: point.y - center.y, z: point.z - center.z };
+    this.recordWrench(body, force, cross(arm, force));
+    this.stepScopedForceBodies.add(body);
+  }
+
+  readWorldPoint(handle: BodyHandle, localPoint: Vector3): Vector3 {
+    if (![localPoint.x, localPoint.y, localPoint.z].every(Number.isFinite)) throw new Error('Local point must be finite');
+    const body = this.bodies.get(handle);
+    if (!body) throw new Error(`Unknown body handle: ${handle}`);
+    return worldPoint(body, localPoint);
+  }
+
+  readPointVelocity(handle: BodyHandle, localPoint: Vector3): Vector3 {
+    const point = this.readWorldPoint(handle, localPoint);
+    const body = this.bodies.get(handle)!;
+    const velocity = body.velocityAtPoint(point);
+    return { x: velocity.x, y: velocity.y, z: velocity.z };
+  }
+
   setBoxFriction(handle: BodyHandle, friction: number): void {
     if (!Number.isFinite(friction) || friction < 0) throw new Error('Box friction must be non-negative and finite');
     if (!this.staticWorldBoxHandles.has(handle)) throw new Error(`Unknown static world box handle: ${handle}`);
