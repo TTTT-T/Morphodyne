@@ -3,6 +3,7 @@ import { createControlSignal, type ControlSignal } from '../core/actuation';
 import type { Blueprint } from '../core/model';
 import { RapierPhysicsAdapter } from '../physics/RapierPhysicsAdapter';
 import { ActiveBodyController, type JointFeedback } from '../simulation/ActiveBodyController';
+import { EnergyRuntime } from '../simulation/EnergyRuntime';
 import { JointActuatorRuntime } from '../simulation/JointActuatorRuntime';
 import { StructuralDamageRuntime } from '../simulation/StructuralDamageRuntime';
 import { createActiveBlueprint, getActiveBodyAssemblies } from './activeBody';
@@ -25,7 +26,7 @@ async function setup(blueprint: Blueprint) {
   const physics = await RapierPhysicsAdapter.create();
   physics.createBox({ halfExtents: { x: 12, y: 0.1, z: 12 }, position: { x: 0, y: -0.1, z: 0 }, dynamic: false });
   const body = physics.createBody({ id: 'trial', blueprint });
-  const actuator = new JointActuatorRuntime(blueprint, physics, body, { availablePowerWatts: 400 });
+  const actuator = new JointActuatorRuntime(blueprint, physics, body, new EnergyRuntime({ capacityJ: 100000, maxPowerWatts: 400, efficiency: 1 }));
   return { physics, body, actuator };
 }
 

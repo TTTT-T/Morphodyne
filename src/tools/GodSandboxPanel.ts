@@ -96,7 +96,7 @@ export interface GodSandboxPanelHandle {
 const DEFAULT_CATALOG: readonly GodSandboxCatalogEntry[] = [
   { id: 'passive-object', label: '箱子 / 被动物体', blueprint: () => createPassiveObjectBlueprint() },
   { id: 'actuated-machine', label: '简单机械结构', blueprint: () => createActuatedMachineBlueprint(),
-    spawnOptions: { energy: { availablePowerWatts: 100 },
+    spawnOptions: { energy: { capacityJ: 1000, maxPowerWatts: 100, efficiency: 1 },
       control: (_seconds, tick) => [createControlSignal('machine-hinge-actuator', Math.sin(tick * 0.12))] } },
   { id: 'sensor-platform', label: '传感器平台', blueprint: () => createSensorPlatformBlueprint() },
   { id: 'active-body', label: 'Agent（未控制）', blueprint: () => createActiveBlueprint() },

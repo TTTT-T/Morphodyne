@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createControlSignal } from '../core/actuation';
 import { RapierPhysicsAdapter } from '../physics/RapierPhysicsAdapter';
 import { BrainRuntime, skillIntentToControlIntent } from '../simulation/BrainRuntime';
+import { EnergyRuntime } from '../simulation/EnergyRuntime';
 import { JointActuatorRuntime } from '../simulation/JointActuatorRuntime';
 import { SensorRuntime } from '../simulation/SensorRuntime';
 import { StructuralDamageRuntime } from '../simulation/StructuralDamageRuntime';
@@ -9,7 +10,7 @@ import { createActiveBlueprint } from './activeBody';
 
 const STEP = 1 / 60;
 
-async function setup(withRangeSensor = true, availablePowerWatts = 400) {
+async function setup(withRangeSensor = true, maxPowerWatts = 400) {
   const physics = await RapierPhysicsAdapter.create();
   physics.createBox({ halfExtents: { x: 12, y: 0.1, z: 12 }, position: { x: 0, y: -0.1, z: 0 }, dynamic: false });
   const fullBlueprint = createActiveBlueprint();
@@ -20,7 +21,8 @@ async function setup(withRangeSensor = true, availablePowerWatts = 400) {
   const damage = new StructuralDamageRuntime(blueprint, physics, body);
   const sensors = new SensorRuntime(blueprint, 'part-core', physics, body, () => damage.state, () => 0.5);
   const brain = new BrainRuntime();
-  const actuators = new JointActuatorRuntime(blueprint, physics, body, { availablePowerWatts });
+  const actuators = new JointActuatorRuntime(blueprint, physics, body,
+    new EnergyRuntime({ capacityJ: 100000, maxPowerWatts, efficiency: 1 }));
   function step(tick: number) {
     physics.step(STEP);
     damage.afterPhysicsStep(tick);
@@ -48,8 +50,8 @@ describe('Phase 5 physical brain loop', () => {
   });
 
   it('does not guarantee a physical result from the same goal and skill attempt', async () => {
-    async function attempt(availablePowerWatts: number) {
-      const trial = await setup(true, availablePowerWatts);
+    async function attempt(maxPowerWatts: number) {
+      const trial = await setup(true, maxPowerWatts);
       trial.physics.createBox({ halfExtents: { x: 0.35, y: 0.35, z: 0.35 },
         position: { x: -0.85, y: 1, z: -2.5 }, dynamic: false });
       const selected = trial.step(0);

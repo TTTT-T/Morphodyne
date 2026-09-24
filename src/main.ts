@@ -171,14 +171,14 @@ async function main(): Promise<void> {
   construction.spawn(passiveEntity, { origin: { x: -3.2, y: 0, z: 1.3 } });
   construction.spawn(machineEntity, {
     origin: { x: 3.2, y: 0, z: 1.3 },
-    energy: { availablePowerWatts: 100 },
+    energy: { capacityJ: 1000, maxPowerWatts: 100, efficiency: 1 },
     control: machineControl,
   });
   construction.spawn(sensorPlatformEntity, { origin: { x: -0.8, y: 0, z: -2.8 } });
   construction.spawn(sensorTargetEntity, { origin: { x: 1.25, y: 0, z: -2.8 } });
   construction.spawn(agentEntity, {
     origin: { x: 0, y: 0, z: 2.4 },
-    energy: { availablePowerWatts: 400 },
+    energy: { capacityJ: 4000, maxPowerWatts: 400, efficiency: 1 },
     agent: { control: agentControl },
   });
 

@@ -12,10 +12,10 @@ const FLOOR = { id: 'floor', halfExtents: { x: 6, y: 0.1, z: 6 },
 const kinds: { name: string; blueprint: () => Blueprint; partId: string; options?: Parameters<WorldRuntime['spawn']>[1] }[] = [
   { name: 'passive', blueprint: createPassiveObjectBlueprint, partId: 'passive-object-body' },
   { name: 'machine', blueprint: createActuatedMachineBlueprint, partId: 'machine-base',
-    options: { energy: { availablePowerWatts: 100 }, control: () => [{ actuatorId: 'machine-hinge-actuator', value: 0.3 }] } },
+    options: { energy: { capacityJ: 100000, maxPowerWatts: 100, efficiency: 1 }, control: () => [{ actuatorId: 'machine-hinge-actuator', value: 0.3 }] } },
   { name: 'sensor platform', blueprint: createSensorPlatformBlueprint, partId: 'sensor-platform-body' },
   { name: 'Agent', blueprint: createActiveBlueprint, partId: 'part-core',
-    options: { energy: { availablePowerWatts: 400 }, agent: { control: () => [] } } },
+    options: { energy: { capacityJ: 100000, maxPowerWatts: 400, efficiency: 1 }, agent: { control: () => [] } } },
 ];
 
 async function makeWorld(spec: EnvironmentSpec): Promise<{ world: WorldRuntime; physics: RapierPhysicsAdapter }> {

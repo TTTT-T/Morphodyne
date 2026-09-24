@@ -1,13 +1,14 @@
 import type { Blueprint, Vector3 } from '../core/model';
-import type { ControlSignal, EnergySource, StructuralActuator, TensionActuator } from '../core/actuation';
+import type { ControlSignal, StructuralActuator, TensionActuator } from '../core/actuation';
 import { validateControlSignal } from '../core/actuation';
 import type { PhysicsAdapter } from '../physics/PhysicsAdapter';
 import type { PhysicsBody } from '../physics/PhysicsBody';
+import type { EnergyRuntime } from './EnergyRuntime';
 
 interface Output {
   readonly actuator: StructuralActuator;
   readonly output: number;
-  /** Positive mechanical work rate per unit output. */
+  /** Signed physical velocity along the output axis; tension uses contraction speed. */
   readonly speed: number;
   readonly direction?: Vector3;
   readonly fromPoint?: Vector3;
@@ -24,13 +25,11 @@ export class ActuatorRuntime {
     private readonly blueprint: Blueprint,
     private readonly physics: PhysicsAdapter,
     private readonly body: PhysicsBody,
-    private readonly energy: EnergySource,
+    private readonly energy: EnergyRuntime,
   ) {}
 
   step(signals: readonly ControlSignal[], seconds: number): void {
     if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('Actuator step must be positive and finite');
-    const power = this.energy.availablePowerWatts;
-    if (!Number.isFinite(power) || power < 0) throw new Error('Available power must be nonnegative and finite');
     const commands = new Map<string, number>();
     for (const signal of signals) {
       const errors = validateControlSignal(signal);
@@ -52,15 +51,15 @@ export class ActuatorRuntime {
       const output = response === undefined ? target : previous + (target - previous) * seconds / (response + seconds);
       this.lastOutput.set(actuator.id, output);
       if (actuator.kind !== 'tension') {
-        return { actuator, output, speed: Math.abs(this.physics.readJointVelocity(this.body, actuator.connectionId)) };
+        return { actuator, output, speed: this.physics.readJointVelocity(this.body, actuator.connectionId) };
       }
       return this.tensionOutput(actuator, output);
     });
 
-    // Idealized source: only positive mechanical work draws from the current
-    // power ceiling. This does not introduce stored energy, heat, or fatigue.
-    const demandedWatts = outputs.reduce((sum, entry) => sum + Math.abs(entry.output) * entry.speed, 0);
-    const powerScale = power === 0 ? 0 : demandedWatts > power ? power / demandedWatts : 1;
+    // Positive mechanical work only. Joint velocity is signed; tension speed
+    // is positive only while the attachment span contracts.
+    const demandedWatts = outputs.reduce((sum, entry) => sum + Math.max(0, entry.output * entry.speed), 0);
+    const powerScale = this.energy.allocate(demandedWatts, seconds);
     for (const entry of outputs) {
       const { actuator, output } = entry;
       if (actuator.kind !== 'tension') {

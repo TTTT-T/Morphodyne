@@ -66,7 +66,7 @@ describe('Phase 9 physical structural load through WorldRuntime', () => {
         part('base', 0, 2, { x: 0.18, y: 0.18, z: 0.18 }, 100),
         part('arm', 0.65, 2, { x: 0.5, y: 0.07, z: 0.1 }, 2),
       ], connection, material(), [{ id: 'motor', connectionId: 'hinge', maxOutput: 20 }]) }, {
-        energy: { availablePowerWatts: 1000 }, control: () => [{ actuatorId: 'motor', value: 1 }],
+        energy: { capacityJ: 100000, maxPowerWatts: 1000, efficiency: 1 }, control: () => [{ actuatorId: 'motor', value: 1 }],
       });
       const body = world.getPhysicsBody('machine');
       let peakForceN = 0;
