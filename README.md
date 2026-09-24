@@ -2,7 +2,7 @@
 
 > **Entities have no predefined abilities. Capability emerges from structure.**
 
-Morphodyne is a physics-first god sandbox focused on embodied agents, structural simulation, damage, perception, learning, and emergent behavior.
+Morphodyne is a physics-first god sandbox focused on universal world rules, composable structures, physical interaction, and optional embodied agents.
 
 The project is built around one central idea: entities do not receive game-style abilities such as `canWalk`, `attackPower`, or `biteDamage`. Their capabilities emerge from body structure, materials, connections, actuators, learned control, current condition, and the environment.
 
@@ -36,9 +36,9 @@ See:
 
 ## Status
 
-**Pre-alpha / Phase 6 skill adaptation complete. Phase 7 next.**
+**Pre-alpha / Phase 6 skill adaptation complete. Phase 6.5 Generality & World Foundation next.**
 
-The project currently prioritizes correct interfaces, modularity, causal correctness, and testability over visual fidelity or content volume.
+The project currently prioritizes universal world/structure rules, causal correctness, modularity, and testability over visual fidelity or content volume. The active quadruped is a validation Blueprint, not the architectural center of the project.
 
 
 ## Quick start
