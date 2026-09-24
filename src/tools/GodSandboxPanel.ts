@@ -1,24 +1,24 @@
 import './GodSandboxPanel.css';
 
-import { createControlSignal, type StructuralActuator } from '../core/actuation';
+import type { EnergySourceSpec, StructuralActuator } from '../core/actuation';
 import type {
   Blueprint,
   Connection,
   Entity,
   Geometry,
+  Material,
   Part,
   Sensor,
   Vector3,
 } from '../core/model';
 import type { StructuralDamageState } from '../core/damage';
+import type { ConnectionLoad } from '../physics/PhysicsAdapter';
 import type { SpawnOptions, StructuralComponentView, RuntimeEntityView, WorldRuntime } from '../simulation/WorldRuntime';
 import type { ConstructionRuntime } from '../simulation/ConstructionRuntime';
-import {
-  createActuatedMachineBlueprint,
-  createPassiveObjectBlueprint,
-  createSensorPlatformBlueprint,
-} from './worldFixtures';
-import { createActiveBlueprint } from './activeBody';
+import type { EnergyState } from '../simulation/EnergyRuntime';
+import { ManualControlSource } from './ManualControlSource';
+import { SANDBOX_CATALOG } from './sandboxTemplates';
+import { createSandboxPayloadBlueprint } from './sandboxBlueprintCatalog';
 
 const IDENTITY_ROTATION = { x: 0, y: 0, z: 0, w: 1 } as const;
 const IDENTITY_POSE = { position: { x: 0, y: 0, z: 0 }, rotation: IDENTITY_ROTATION } as const;
@@ -38,6 +38,7 @@ export type GodSandboxCatalog =
 export interface GodSandboxPanelOptions {
   readonly catalog?: GodSandboxCatalog;
   readonly spawnOptions?: SpawnOptions;
+  readonly onSelectionChanged?: (entityId?: string, partId?: string) => void;
 }
 
 export interface GodSandboxWorld {
@@ -45,6 +46,12 @@ export interface GodSandboxWorld {
   stepOnce(): void;
   setTimeScale(value: number): void;
   listEntities(): readonly RuntimeEntityView[];
+  removeEntity?(entityId: string): void;
+  inspectEnergy?(entityId: string): EnergyState | undefined;
+  readPartPose?(componentId: string, partId: string): { readonly position: Vector3 };
+  readPartContacts?(entityId: string, partId: string): readonly unknown[];
+  readPartVelocity?(entityId: string, partId: string): Vector3 | undefined;
+  readConnectionLoad?(entityId: string, connectionId: string): ConnectionLoad | undefined;
   readonly environment?: {
     setWeather(weather: 'clear' | 'rain'): void;
     setTimeOfDay(hour: number): void;
@@ -93,14 +100,7 @@ export interface GodSandboxPanelHandle {
   destroy(): void;
 }
 
-const DEFAULT_CATALOG: readonly GodSandboxCatalogEntry[] = [
-  { id: 'passive-object', label: '箱子 / 被动物体', blueprint: () => createPassiveObjectBlueprint() },
-  { id: 'actuated-machine', label: '简单机械结构', blueprint: () => createActuatedMachineBlueprint(),
-    spawnOptions: { energy: { capacityJ: 1000, maxPowerWatts: 100, efficiency: 1 },
-      control: (_seconds, tick) => [createControlSignal('machine-hinge-actuator', Math.sin(tick * 0.12))] } },
-  { id: 'sensor-platform', label: '传感器平台', blueprint: () => createSensorPlatformBlueprint() },
-  { id: 'active-body', label: 'Agent（未控制）', blueprint: () => createActiveBlueprint() },
-];
+const DEFAULT_CATALOG: readonly GodSandboxCatalogEntry[] = SANDBOX_CATALOG;
 
 function formatError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -176,6 +176,24 @@ function parsePositive(value: string, label: string): number {
   const parsed = parseNumber(value, label);
   if (parsed <= 0) throw new Error(`${label}必须大于零`);
   return parsed;
+}
+
+function readVector(inputs: readonly HTMLInputElement[], label: string): Vector3 {
+  return { x: parseNumber(inputs[0].value, `${label} X`), y: parseNumber(inputs[1].value, `${label} Y`), z: parseNumber(inputs[2].value, `${label} Z`) };
+}
+
+function vectorInputs(parent: HTMLElement, label: string, initial: Vector3 = { x: 0, y: 0, z: 0 }): readonly HTMLInputElement[] {
+  const row = document.createElement('div');
+  row.className = 'god-sandbox-row';
+  const inputs = (['x', 'y', 'z'] as const).map((axis) => labeled(row, `${label} ${axis.toUpperCase()}`, numberInput(String(initial[axis]))));
+  parent.append(row);
+  return inputs;
+}
+
+function setVector(inputs: readonly HTMLInputElement[], value: Vector3): void {
+  inputs[0].value = String(value.x);
+  inputs[1].value = String(value.y);
+  inputs[2].value = String(value.z);
 }
 
 function inverseRotate(vector: Vector3, rotation: { readonly x: number; readonly y: number; readonly z: number; readonly w: number }): Vector3 {
@@ -297,6 +315,10 @@ function buildRigidConnection(id: string, from: Part, to: Part): Connection {
 }
 
 function friendlyBlueprintName(id: string): string {
+  if (id === 'sandbox-joint-mechanism') return '基础关节机构';
+  if (id === 'sandbox-tension-mechanism') return '基础拉力机构';
+  if (id === 'sandbox-gripper') return '基础夹持机构';
+  if (id === 'sandbox-passive-payload') return '独立方块';
   if (id.includes('passive-object')) return '箱子 / 被动物体';
   if (id.includes('actuated-machine')) return '简单机械结构';
   if (id.includes('sensor-platform')) return '传感器平台';
@@ -310,6 +332,10 @@ function renderDamageSummary(damage: StructuralDamageState): string {
   const damagedParts = partStates.filter((entry) => entry.damage.state !== 'intact').length;
   const damagedConnections = connectionStates.filter((entry) => entry.damage.state !== 'intact').length;
   return `受损部件 ${damagedParts}/${partStates.length} · 受损连接 ${damagedConnections}/${connectionStates.length}`;
+}
+
+function damageLabel(state: string | undefined): string {
+  return ({ intact: '完好', degraded: '受损', fractured: '断裂', separated: '已分离' } as Record<string, string>)[state ?? ''] ?? '无读数';
 }
 
 /** Mount a small framework-free God Sandbox control surface. */
@@ -333,14 +359,26 @@ export function mountGodSandboxPanel(
   status.className = 'god-sandbox-status';
   status.setAttribute('role', 'status');
   root.append(status);
+  const modeSummary = document.createElement('strong');
+  root.append(modeSummary);
 
   let selectedEntityId: string | undefined;
   let selectedPartId: string | undefined;
   let selectedConnectionId: string | undefined;
+  let selectedActuatorId: string | undefined;
   let selectedComponentId: string | undefined;
   let nextEntitySerial = 1;
   let blueprintDraftDirty = false;
   let partDraftDirty = false;
+  let connectionDraftDirty = false;
+  let actuatorDraftDirty = false;
+  let materialDraftDirty = false;
+  let controlRenderKey = '';
+  const manualSources = new Map<string, ManualControlSource>();
+  const templateIds = new Map<string, string>();
+  const companionIds = new Map<string, string>();
+  function editing(): boolean { return world.paused; }
+  function requireEdit(): void { if (!editing()) throw new Error('请先暂停，进入编辑模式'); }
 
   function nextSandboxEntityId(prefix = 'sandbox-entity'): string {
     const current = new Set(world.listEntities().map((entity) => entity.id));
@@ -365,7 +403,7 @@ export function mountGodSandboxPanel(
 
   const time = fieldset(timeGroup, '时间控制');
   const pauseButton = button(time, '', () => run('运行状态已更新', () => { world.paused = !world.paused; }));
-  button(time, '单步运行', () => run('已前进一步', () => world.stepOnce()));
+  const stepButton = button(time, '单步运行', () => run('已前进一步', () => world.stepOnce()));
   const timeScale = labeled(time, '时间速度', selectInput());
   for (const value of [0.1, 0.25, 0.5, 1, 2]) addOption(timeScale, String(value), `${value}×`, value === 1);
   timeScale.addEventListener('change', () => run(`时间速度已设为 ${timeScale.value} 倍`, () => world.setTimeScale(parseNumber(timeScale.value, '时间速度'))));
@@ -382,8 +420,8 @@ export function mountGodSandboxPanel(
   if (!environmentApi) { clearWeather.disabled = true; rainWeather.disabled = true; dayButton.disabled = true; nightButton.disabled = true; hint(environmentGroup, '此测试世界未提供环境控制接口。'); }
 
   const spawn = fieldset(createGroup, '生成物体');
-  const blueprintChoice = labeled(spawn, '物体类型', selectInput());
-  hint(spawn, 'Agent 示例目前未受控，只用于查看结构和物理表现。');
+  const blueprintChoice = labeled(spawn, '基础模板', selectInput());
+  hint(spawn, '选择结构，修改执行器控制，再观察物理结果。');
   for (const entry of catalog) addOption(blueprintChoice, entry.id, entry.label ?? entry.id);
   const entityIdInput = labeled(advanced, '物体内部编号（高级）', textInput(nextSandboxEntityId()));
   const spawnOrigin = document.createElement('div');
@@ -392,16 +430,28 @@ export function mountGodSandboxPanel(
   const spawnY = labeled(spawnOrigin, 'Y', numberInput('0'));
   const spawnZ = labeled(spawnOrigin, 'Z', numberInput('0'));
   spawn.append(spawnOrigin);
-  hint(spawn, '选择物体类型并生成到指定位置。');
-  button(spawn, '生成', () => run('已生成物体', () => {
-    const entry = catalog.find((candidate) => candidate.id === blueprintChoice.value);
+  const capacityInput = labeled(spawn, '能量容量 J', numberInput('1000'));
+  const powerInput = labeled(spawn, '功率上限 W', numberInput('150'));
+  const efficiencyInput = labeled(spawn, '效率（0–1）', numberInput('0.8', '0.05'));
+  hint(spawn, '能量配置在生成或重置时生效；运行中不会补充能量。');
+  function spawnTemplate(templateId = blueprintChoice.value): void {
+    requireEdit();
+    const entry = catalog.find((candidate) => candidate.id === templateId);
     if (!entry) throw new Error('请选择要生成的物体类型');
-    const entityId = entityIdInput.value.trim();
-    if (!entityId) throw new Error('物体内部编号不能为空');
-    const entity: Entity = { id: entityId, blueprint: blueprintFromEntry(entry) };
+    const blueprint = blueprintFromEntry(entry);
+    const entityId = nextSandboxEntityId();
+    const entity: Entity = { id: entityId, blueprint };
+    const manual = new ManualControlSource();
+    const energy: EnergySourceSpec = {
+      capacityJ: parsePositive(capacityInput.value, '能量容量'),
+      maxPowerWatts: parsePositive(powerInput.value, '功率上限'),
+      efficiency: parsePositive(efficiencyInput.value, '效率'),
+    };
+    if (energy.efficiency > 1) throw new Error('效率不能大于 1');
     const spawnOptions: SpawnOptions = {
       ...entry.spawnOptions,
       ...options.spawnOptions,
+      ...(blueprint.actuators?.length ? { energy, control: manual.control } : {}),
       origin: {
         x: parseNumber(spawnX.value, '生成位置 X'),
         y: parseNumber(spawnY.value, '生成位置 Y'),
@@ -409,8 +459,40 @@ export function mountGodSandboxPanel(
       },
     };
     construction.spawn(entity, spawnOptions);
+    if (templateId === 'gripper') {
+      const payloadId = nextSandboxEntityId('sandbox-payload');
+      construction.spawn({ id: payloadId, blueprint: createSandboxPayloadBlueprint() }, { origin: spawnOptions.origin });
+      companionIds.set(entity.id, payloadId);
+    }
+    manualSources.set(entity.id, manual);
+    templateIds.set(entity.id, templateId);
     selectedEntityId = entity.id;
     entityIdInput.value = nextSandboxEntityId();
+  }
+  button(spawn, '生成模板', () => run('已生成结构', () => spawnTemplate(), true));
+  button(spawn, '重置当前模板', () => run('已重置当前模板', () => {
+    const selectedId = requireEntity();
+    const id = templateIds.has(selectedId) ? selectedId
+      : [...companionIds].find(([, companionId]) => companionId === selectedId)?.[0] ?? selectedId;
+    const templateId = templateIds.get(id);
+    if (!templateId || !world.removeEntity) throw new Error('当前物体不是可重置的模板');
+    requireEdit();
+    const companionId = companionIds.get(id);
+    if (companionId && world.listEntities().some((entity) => entity.id === companionId)) world.removeEntity(companionId);
+    world.removeEntity(id);
+    manualSources.delete(id);
+    templateIds.delete(id);
+    companionIds.delete(id);
+    spawnTemplate(templateId);
+  }, true));
+  button(spawn, '重新生成场景', () => run('场景已重新生成', () => {
+    if (!world.removeEntity) throw new Error('当前世界不支持重建场景');
+    requireEdit();
+    for (const entity of world.listEntities()) world.removeEntity(entity.id);
+    manualSources.clear();
+    templateIds.clear();
+    companionIds.clear();
+    spawnTemplate();
   }, true));
 
   const selection = fieldset(worldGroup, '当前世界与物体');
@@ -420,13 +502,16 @@ export function mountGodSandboxPanel(
   entitySummary.className = 'god-sandbox-summary';
   selection.append(entitySummary);
   const componentChoice = labeled(selection, '结构组件', selectInput());
-  const partChoice = labeled(selection, '部件（Part）', selectInput());
-  const connectionChoice = labeled(selection, '连接（Connection）', selectInput());
+  const partChoice = labeled(selection, '部件', selectInput());
+  const connectionChoice = labeled(selection, '连接', selectInput());
   const structureSummary = document.createElement('div');
   structureSummary.className = 'god-sandbox-summary';
-  advanced.append(structureSummary);
+  selection.append(structureSummary);
+  const partPosition = document.createElement('pre');
+  partPosition.className = 'god-sandbox-summary';
+  selection.append(partPosition);
 
-  const partEditor = fieldset(editGroup, '编辑部件（Part）');
+  const partEditor = fieldset(editGroup, '编辑部件');
   hint(partEditor, '添加部件：给当前物体增加一个新的物理部件。');
   const partMaterial = labeled(advanced, '材料内部编号（高级）', textInput());
   const partMass = labeled(partEditor, '质量', numberInput());
@@ -450,6 +535,7 @@ export function mountGodSandboxPanel(
   partActions.className = 'god-sandbox-actions';
   partEditor.append(partActions);
   const applyPartButton = button(partActions, '应用部件修改', () => run('部件已更新', () => {
+    requireEdit();
     const entityId = requireEntity();
     const part = requirePart();
     const geometry = selectedGeometry(part, partGeometryKind.value as Geometry['kind'], geometryA.value, geometryB.value, geometryC.value, convexPoints.value);
@@ -461,12 +547,14 @@ export function mountGodSandboxPanel(
     });
   }, true));
   button(partJsonDetails, '应用部件 JSON', () => run('已应用部件 JSON', () => {
+    requireEdit();
     const entityId = requireEntity();
     const parsed: unknown = JSON.parse(partJson.value);
     if (!parsed || typeof parsed !== 'object') throw new Error('部件 JSON 必须是对象');
     construction.updatePart(entityId, parsed as Part);
   }, true));
   const addPartButton = button(partActions, '添加部件', () => run('已添加部件', () => {
+    requireEdit();
     const inspection = requireInspection();
     const materialId = inspection.blueprint.materials[0]?.id;
     if (!materialId) throw new Error('蓝图中没有可供新部件使用的材料');
@@ -478,7 +566,28 @@ export function mountGodSandboxPanel(
       mass: 1,
     });
   }, true));
-  const removePartButton = button(partActions, '删除部件', () => run('已删除部件', () => construction.removePart(requireEntity(), requirePart().id), true));
+  const removePartButton = button(partActions, '删除部件', () => run('已删除部件', () => { requireEdit(); construction.removePart(requireEntity(), requirePart().id); }, true));
+
+  const materialEditor = fieldset(editGroup, '材料');
+  hint(materialEditor, '材料修改会重建结构；同一材料编号的部件会一起受到影响。');
+  const materialFriction = labeled(materialEditor, '摩擦系数', numberInput());
+  const materialDensity = labeled(materialEditor, '密度', numberInput());
+  const materialYieldForce = labeled(materialEditor, '屈服载荷 N（高级）', numberInput());
+  const materialUltimateForce = labeled(materialEditor, '断裂载荷 N（高级）', numberInput());
+  button(materialEditor, '应用材料修改', () => run('材料已更新', () => {
+    requireEdit();
+    const inspection = requireInspection();
+    const current = inspection.blueprint.materials.find((entry) => entry.id === requirePart().materialId);
+    if (!current) throw new Error('材料不存在');
+    const material: Material = { ...current,
+      friction: parseNumber(materialFriction.value, '摩擦系数'),
+      density: parsePositive(materialDensity.value, '密度'),
+      yieldForceN: materialYieldForce.value.trim() ? parsePositive(materialYieldForce.value, '屈服载荷') : undefined,
+      ultimateForceN: materialUltimateForce.value.trim() ? parsePositive(materialUltimateForce.value, '断裂载荷') : undefined,
+    };
+    construction.replaceBlueprint(inspection.entity.id, { ...inspection.blueprint,
+      materials: inspection.blueprint.materials.map((entry) => entry.id === current.id ? material : entry) });
+  }, true));
 
   const connections = fieldset(editGroup, '连接两个部件');
   hint(connections, '连接：把两个部件用物理连接固定在一起。');
@@ -486,32 +595,63 @@ export function mountGodSandboxPanel(
   connectionEndpoints.className = 'god-sandbox-row';
   const connectionFrom = labeled(connectionEndpoints, '部件一', selectInput());
   const connectionTo = labeled(connectionEndpoints, '部件二', selectInput());
+  const newConnectionKind = labeled(connections, '新连接种类', selectInput());
+  for (const [kind, label] of [['rigid', '固定'], ['revolute', '旋转'], ['prismatic', '滑动']] as const) addOption(newConnectionKind, kind, label);
   button(connectionEndpoints, '连接部件', () => run('已连接部件', () => {
+    requireEdit();
     const inspection = requireInspection();
     const from = inspection.blueprint.parts.find((part) => part.id === connectionFrom.value);
     const to = inspection.blueprint.parts.find((part) => part.id === connectionTo.value);
     if (!from || !to) throw new Error('请选择两个部件');
     if (from.id === to.id) throw new Error('连接需要选择两个不同的部件');
-    construction.addConnection(requireEntity(), buildRigidConnection(
+    const rigid = buildRigidConnection(
       makeId('connection', inspection.blueprint.connections.map((connection) => connection.id)), from, to,
-    ));
+    );
+    const connection: Connection = newConnectionKind.value === 'rigid' ? rigid
+      : { ...rigid, kind: newConnectionKind.value as 'revolute' | 'prismatic', axis: { x: 0, y: 0, z: 1 } };
+    construction.addConnection(requireEntity(), connection);
   }, true));
   connections.append(connectionEndpoints);
   const connectionActions = document.createElement('div');
   connectionActions.className = 'god-sandbox-actions';
   connections.append(connectionActions);
-  const detachButton = button(connectionActions, '拆开连接', () => run('已拆开连接', () => construction.detach(requireEntity(), requireConnectionId()), true));
-  const reattachButton = button(connectionActions, '重新连接', () => run('已重新连接', () => construction.reattach(requireEntity(), requireConnectionId()), true));
-  const removeConnectionButton = button(connectionActions, '删除连接', () => run('已删除连接', () => construction.removeConnection(requireEntity(), requireConnectionId()), true));
-  const repairConnectionButton = button(connectionActions, '修复此连接', () => run('已修复连接', () => construction.repair(requireEntity(), requireConnectionId())));
-  button(connectionActions, '修复整个结构', () => run('结构已修复', () => construction.repair(requireEntity())));
+  const connectionKind = labeled(connections, '选中连接种类', selectInput());
+  for (const [kind, label] of [['rigid', '固定'], ['revolute', '旋转'], ['prismatic', '滑动']] as const) addOption(connectionKind, kind, label);
+  const fromAnchorInputs = vectorInputs(connections, '端点一锚点');
+  const toAnchorInputs = vectorInputs(connections, '端点二锚点');
+  const axisInputs = vectorInputs(connections, '轴向', { x: 0, y: 0, z: 1 });
+  const limitMin = labeled(connections, '范围下限', numberInput('-1'));
+  const limitMax = labeled(connections, '范围上限', numberInput('1'));
+  const connectionStrength = labeled(connections, '抗冲击阈值 N·s（高级）', numberInput());
+  const updateConnectionButton = button(connectionActions, '应用连接修改', () => run('连接已更新', () => {
+    requireEdit();
+    const inspection = requireInspection();
+    const current = inspection.blueprint.connections.find((entry) => entry.id === requireConnectionId());
+    if (!current) throw new Error('请选择仍存在的连接');
+    const base = { id: current.id, fromPartId: current.fromPartId, toPartId: current.toPartId,
+      strengthImpulseNs: connectionStrength.value.trim() ? parsePositive(connectionStrength.value, '抗冲击阈值') : undefined,
+      yieldForceN: current.yieldForceN,
+      ultimateForceN: current.ultimateForceN, yieldTorqueNm: current.yieldTorqueNm,
+      ultimateTorqueNm: current.ultimateTorqueNm,
+      fromAnchor: readVector(fromAnchorInputs, '端点一锚点'), toAnchor: readVector(toAnchorInputs, '端点二锚点') };
+    const connection: Connection = connectionKind.value === 'rigid' ? { ...base, kind: 'rigid' }
+      : { ...base, kind: connectionKind.value as 'revolute' | 'prismatic',
+        axis: readVector(axisInputs, '轴向'),
+        limits: { min: parseNumber(limitMin.value, '范围下限'), max: parseNumber(limitMax.value, '范围上限') } };
+    construction.replaceBlueprint(inspection.entity.id, { ...inspection.blueprint,
+      connections: inspection.blueprint.connections.map((entry) => entry.id === current.id ? connection : entry) });
+  }, true));
+  const detachButton = button(connectionActions, '拆开连接', () => run('已拆开连接', () => { requireEdit(); construction.detach(requireEntity(), requireConnectionId()); }, true));
+  const reattachButton = button(connectionActions, '重新连接', () => run('已重新连接', () => { requireEdit(); construction.reattach(requireEntity(), requireConnectionId()); }, true));
+  const removeConnectionButton = button(connectionActions, '删除连接', () => run('已删除连接', () => { requireEdit(); construction.removeConnection(requireEntity(), requireConnectionId()); }, true));
+  const repairConnectionButton = button(connectionActions, '修复此连接', () => run('已修复连接', () => { requireEdit(); construction.repair(requireEntity(), requireConnectionId()); }));
+  button(connectionActions, '修复整个结构', () => run('结构已修复', () => { requireEdit(); construction.repair(requireEntity()); }));
   const connectionInspection = document.createElement('pre');
   connectionInspection.className = 'god-sandbox-summary';
-  const connectionDebug = document.createElement('details');
-  const connectionDebugSummary = document.createElement('summary');
-  connectionDebugSummary.textContent = '连接内部状态（高级）';
-  connectionDebug.append(connectionDebugSummary, connectionInspection);
-  advanced.append(connectionDebug);
+  connections.append(connectionInspection);
+  const connectionRaw = document.createElement('pre');
+  connectionRaw.className = 'god-sandbox-summary';
+  advanced.append(connectionRaw);
 
   const impact = fieldset(impactGroup, '施加作用与修复');
   hint(impact, '施加冲击：给选中部件一个瞬间外力，用于测试损伤和结构变化。');
@@ -532,38 +672,74 @@ export function mountGodSandboxPanel(
       z: parseNumber(impulseZ.value, '冲击 Z'),
     });
   }));
-  const repairPartButton = button(impact, '修复选中部件', () => run('部件已修复', () => construction.repair(requireEntity(), requirePart().id)));
+  const repairPartButton = button(impact, '修复选中部件', () => run('部件已修复', () => { requireEdit(); construction.repair(requireEntity(), requirePart().id); }));
 
   const attachments = fieldset(editGroup, '执行器与传感器');
   hint(attachments, '执行器让连接产生力或扭矩；传感器安装在部件上。');
-  const actuatorChoice = labeled(attachments, '执行器（Actuator）', selectInput());
+  const actuatorChoice = labeled(attachments, '执行器', selectInput());
+  const actuatorKind = labeled(attachments, '执行器种类', selectInput());
+  addOption(actuatorKind, 'joint', '关节执行器');
+  addOption(actuatorKind, 'tension', '拉力执行器');
+  const actuatorConnection = labeled(attachments, '驱动连接', selectInput());
+  const tensionFrom = labeled(attachments, '拉力端点一部件', selectInput());
+  const tensionTo = labeled(attachments, '拉力端点二部件', selectInput());
+  const tensionFromInputs = vectorInputs(attachments, '端点一位置');
+  const tensionToInputs = vectorInputs(attachments, '端点二位置');
+  const maxOutputInput = labeled(attachments, '最大输出 N / N·m', numberInput('10'));
+  const responseInput = labeled(attachments, '响应时间 秒', numberInput('0.1'));
   const actuatorActions = document.createElement('div');
   actuatorActions.className = 'god-sandbox-actions';
   attachments.append(actuatorActions);
-  const addActuatorButton = button(actuatorActions, '为连接添加执行器', () => run('已添加执行器', () => {
+  const addActuatorButton = button(actuatorActions, '添加执行器', () => run('已添加执行器', () => {
+    requireEdit();
     const inspection = requireInspection();
-    const connectionId = requireConnectionId();
-    const connection = inspection.blueprint.connections.find((entry) => entry.id === connectionId);
-    if (!connection || (connection.kind !== 'revolute' && connection.kind !== 'prismatic')) {
-      throw new Error('执行器需要安装在旋转或滑动连接上');
+    if (!world.inspectEnergy?.(inspection.entity.id)) throw new Error('当前物体没有能量供应，请生成带能量的结构模板');
+    construction.addActuator(requireEntity(), readActuator(makeId('actuator', (inspection.blueprint.actuators ?? []).map((actuator) => actuator.id))));
+  }, true));
+  function readActuator(id: string): StructuralActuator {
+    const common = { id, maxOutput: parsePositive(maxOutputInput.value, '最大输出'),
+      responseTimeSeconds: parsePositive(responseInput.value, '响应时间') };
+    if (actuatorKind.value === 'tension') {
+      if (tensionFrom.value === tensionTo.value) throw new Error('拉力执行器需要两个不同部件');
+      return { ...common, kind: 'tension', fromPartId: tensionFrom.value, toPartId: tensionTo.value,
+        fromAttachment: readVector(tensionFromInputs, '端点一位置'),
+        toAttachment: readVector(tensionToInputs, '端点二位置') };
     }
-    construction.addActuator(requireEntity(), {
-      id: makeId('actuator', (inspection.blueprint.actuators ?? []).map((actuator) => actuator.id)),
-      connectionId,
-      maxOutput: 10,
-      responseTimeSeconds: 0.1,
-    });
+    const connection = requireInspection().blueprint.connections.find((entry) => entry.id === actuatorConnection.value);
+    if (!connection || (connection.kind !== 'revolute' && connection.kind !== 'prismatic')) throw new Error('请选择旋转或滑动连接');
+    return { ...common, kind: 'joint', connectionId: connection.id };
+  }
+  const updateActuatorButton = button(actuatorActions, '应用执行器修改', () => run('执行器已更新', () => {
+    requireEdit();
+    const inspection = requireInspection();
+    const id = selectedValue(actuatorChoice);
+    if (!id) throw new Error('请选择执行器');
+    construction.replaceBlueprint(inspection.entity.id, { ...inspection.blueprint,
+      actuators: inspection.blueprint.actuators?.map((entry) => entry.id === id ? readActuator(id) : entry) });
+    manualSources.get(inspection.entity.id)?.delete(id);
   }, true));
   const removeActuatorButton = button(actuatorActions, '删除执行器', () => run('已删除执行器', () => {
+    requireEdit();
     const actuatorId = selectedValue(actuatorChoice);
     if (!actuatorId) throw new Error('请选择执行器');
     construction.removeActuator(requireEntity(), actuatorId);
+    manualSources.get(requireEntity())?.delete(actuatorId);
   }, true));
-  const sensorChoice = labeled(attachments, '传感器（Sensor）', selectInput());
+  const manualGroup = fieldset(root, '手动控制台');
+  hint(manualGroup, '可在暂停时预设信号，运行中也能调整。关节：-1 到 +1；拉力：0 到 1。');
+  const controlRows = document.createElement('div');
+  manualGroup.append(controlRows);
+  const energySummary = document.createElement('pre');
+  energySummary.className = 'god-sandbox-summary';
+  manualGroup.append(energySummary);
+  root.insertBefore(timeGroup, createGroup);
+  root.insertBefore(manualGroup, editGroup);
+  const sensorChoice = labeled(attachments, '传感器', selectInput());
   const sensorActions = document.createElement('div');
   sensorActions.className = 'god-sandbox-actions';
   attachments.append(sensorActions);
   const addSensorButton = button(sensorActions, '为部件添加距离传感器', () => run('已添加传感器', () => {
+    requireEdit();
     const inspection = requireInspection();
     const partId = requirePart().id;
     construction.addSensor(requireEntity(), {
@@ -581,6 +757,7 @@ export function mountGodSandboxPanel(
     });
   }, true));
   const removeSensorButton = button(sensorActions, '删除传感器', () => run('已删除传感器', () => {
+    requireEdit();
     const sensorId = selectedValue(sensorChoice);
     if (!sensorId) throw new Error('请选择传感器');
     construction.removeSensor(requireEntity(), sensorId);
@@ -611,15 +788,29 @@ export function mountGodSandboxPanel(
     blueprintJson.value = construction.saveBlueprint(requireEntity());
   }, true));
   button(blueprintActions, '应用到当前物体', () => run('已应用蓝图', () => {
+    requireEdit();
     construction.replaceBlueprint(requireEntity(), parseBlueprintJson());
   }, true));
   button(blueprintActions, '作为新物体载入', () => run('已从蓝图生成新物体', () => {
+    requireEdit();
     const blueprint = parseBlueprintJson();
     const entity: Entity = {
       id: nextSandboxEntityId('sandbox-import'),
       blueprint,
     };
-    construction.spawn(entity, options.spawnOptions);
+    const manual = new ManualControlSource();
+    const supply: EnergySourceSpec = {
+      capacityJ: parsePositive(capacityInput.value, '能量容量'),
+      maxPowerWatts: parsePositive(powerInput.value, '功率上限'),
+      efficiency: parsePositive(efficiencyInput.value, '效率'),
+    };
+    if (supply.efficiency > 1) throw new Error('效率不能大于 1');
+    construction.spawn(entity, {
+      ...options.spawnOptions,
+      energy: supply,
+      control: manual.control,
+    });
+    manualSources.set(entity.id, manual);
     selectedEntityId = entity.id;
   }, true));
   const validationErrors = document.createElement('pre');
@@ -632,6 +823,9 @@ export function mountGodSandboxPanel(
     control.addEventListener('input', () => { partDraftDirty = true; });
   }
   partGeometryKind.addEventListener('change', () => { partDraftDirty = true; });
+  for (const control of [materialFriction, materialDensity, materialYieldForce, materialUltimateForce]) control.addEventListener('input', () => { materialDraftDirty = true; });
+  for (const control of [connectionKind, ...fromAnchorInputs, ...toAnchorInputs, ...axisInputs, limitMin, limitMax, connectionStrength]) control.addEventListener('input', () => { connectionDraftDirty = true; });
+  for (const control of [actuatorKind, actuatorConnection, tensionFrom, tensionTo, ...tensionFromInputs, ...tensionToInputs, maxOutputInput, responseInput]) control.addEventListener('input', () => { actuatorDraftDirty = true; });
 
   const inspectionDetails = document.createElement('details');
   inspectionDetails.className = 'god-sandbox-collapsed';
@@ -681,6 +875,9 @@ export function mountGodSandboxPanel(
       if (resetDrafts) {
         blueprintDraftDirty = false;
         partDraftDirty = false;
+        materialDraftDirty = false;
+        connectionDraftDirty = false;
+        actuatorDraftDirty = false;
       }
       setStatus(success);
       onChanged();
@@ -715,7 +912,13 @@ export function mountGodSandboxPanel(
       if (!blueprintDraftDirty) blueprintJson.value = '';
       inspectionJson.textContent = '';
       connectionInspection.textContent = '';
+      connectionRaw.textContent = '';
+      energySummary.textContent = '选择结构后显示能量。';
+      controlRows.textContent = '';
+      controlRenderKey = '';
+      partPosition.textContent = '';
       setDisabled(true);
+      options.onSelectionChanged?.();
       return;
     }
 
@@ -731,6 +934,9 @@ export function mountGodSandboxPanel(
     if (partOwner) selectedComponentId = partOwner.id;
     else if (!components.some((component) => component.id === selectedComponentId)) selectedComponentId = components[0]?.id;
     entitySummary.textContent = `部件 ${blueprint.parts.length} · 连接 ${blueprint.connections.length} · 执行器 ${blueprint.actuators?.length ?? 0} · 传感器 ${blueprint.sensors?.length ?? 0}`;
+    const energy = world.inspectEnergy?.(entity.id);
+    energySummary.textContent = energy ? `容量 ${energy.capacityJ.toFixed(2)} J · 剩余 ${energy.remainingEnergyJ.toFixed(2)} J\n已消耗 ${energy.consumedEnergyJ.toFixed(2)} J · 功率上限 ${energy.maxPowerWatts.toFixed(2)} W\n当前机械功率 ${energy.stepMechanicalPowerWatts.toFixed(2)} W · 效率 ${(energy.efficiency * 100).toFixed(0)}%`
+      : '当前物体没有能量供应。';
     structureSummary.textContent = `${renderDamageSummary(inspection.damage)}\n结构组件 ${components.length}${detached.length ? ` · 已拆开连接 ${detached.length}` : ''}`;
 
     componentChoice.textContent = '';
@@ -738,6 +944,10 @@ export function mountGodSandboxPanel(
     for (const [index, component] of components.entries()) addOption(componentChoice, component.id, `组件 ${index + 1}`, component.id === selectedComponentId);
     partChoice.textContent = '';
     for (const [index, part] of blueprint.parts.entries()) addOption(partChoice, part.id, `部件 ${index + 1}`, part.id === selectedPartId);
+    const pose = selectedPartId && selectedComponentId ? world.readPartPose?.(selectedComponentId, selectedPartId) : undefined;
+    const velocity = selectedPartId ? world.readPartVelocity?.(entity.id, selectedPartId) : undefined;
+    const contacts = selectedPartId ? world.readPartContacts?.(entity.id, selectedPartId) : undefined;
+    partPosition.textContent = pose ? `当前位置：X ${pose.position.x.toFixed(2)} · Y ${pose.position.y.toFixed(2)} · Z ${pose.position.z.toFixed(2)}\n速度：${velocity ? `${velocity.x.toFixed(2)}, ${velocity.y.toFixed(2)}, ${velocity.z.toFixed(2)} m/s` : '无读数'} · 接触点 ${contacts?.length ?? 0}` : '';
     connectionChoice.textContent = '';
     if (allConnections.length === 0) addOption(connectionChoice, '', '无连接');
     for (const { connection, detached: isDetached } of allConnections) {
@@ -750,26 +960,99 @@ export function mountGodSandboxPanel(
       addOption(connectionFrom, part.id, `部件 ${blueprint.parts.indexOf(part) + 1}`, part.id === blueprint.parts[0]?.id);
       addOption(connectionTo, part.id, `部件 ${blueprint.parts.indexOf(part) + 1}`, part.id === blueprint.parts[1]?.id);
     }
+    actuatorConnection.textContent = '';
+    for (const connection of blueprint.connections.filter((entry) => entry.kind !== 'rigid')) addOption(actuatorConnection, connection.id, connection.id);
+    for (const select of [tensionFrom, tensionTo]) {
+      select.textContent = '';
+      for (const part of blueprint.parts) addOption(select, part.id, part.id);
+    }
+    if (!blueprint.actuators?.some((entry) => entry.id === selectedActuatorId)) selectedActuatorId = blueprint.actuators?.[0]?.id;
     actuatorChoice.textContent = '';
     if (!(blueprint.actuators?.length)) addOption(actuatorChoice, '', '无执行器');
-    for (const [index, actuator] of (blueprint.actuators ?? []).entries()) addOption(actuatorChoice, actuator.id, `执行器 ${index + 1}`);
+    for (const [index, actuator] of (blueprint.actuators ?? []).entries()) addOption(actuatorChoice, actuator.id, `执行器 ${index + 1} · ${actuator.kind === 'tension' ? '拉力' : '关节'}`, actuator.id === selectedActuatorId);
+    if (!actuatorDraftDirty) {
+      const actuator = blueprint.actuators?.find((entry) => entry.id === selectedActuatorId);
+      if (actuator) {
+        actuatorKind.value = actuator.kind === 'tension' ? 'tension' : 'joint';
+        maxOutputInput.value = String(actuator.maxOutput);
+        responseInput.value = String(actuator.responseTimeSeconds ?? 0.1);
+        if (actuator.kind === 'tension') {
+          tensionFrom.value = actuator.fromPartId;
+          tensionTo.value = actuator.toPartId;
+          setVector(tensionFromInputs, actuator.fromAttachment);
+          setVector(tensionToInputs, actuator.toAttachment);
+        } else actuatorConnection.value = actuator.connectionId;
+      }
+    }
+    const activeActuatorIds = new Set(entity.actuatorIds);
+    for (const actuator of blueprint.actuators ?? []) {
+      if (!activeActuatorIds.has(actuator.id)) manualSources.get(entity.id)?.delete(actuator.id);
+    }
+    const nextControlKey = `${entity.id}/${(blueprint.actuators ?? []).map((actuator) => `${actuator.id}:${actuator.kind}:${activeActuatorIds.has(actuator.id)}`).join(',')}`;
+    if (nextControlKey !== controlRenderKey) {
+      controlRows.textContent = '';
+      controlRenderKey = nextControlKey;
+    for (const actuator of blueprint.actuators ?? []) {
+      const row = document.createElement('label');
+      const caption = document.createElement('span');
+      caption.textContent = `${actuator.kind === 'tension' ? '拉力' : '关节'} ${actuator.id}${activeActuatorIds.has(actuator.id) ? '' : ' · 已分离'}`;
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = actuator.kind === 'tension' ? '0' : '-1';
+      slider.max = '1';
+      slider.step = '0.05';
+      slider.value = String(manualSources.get(entity.id)?.get(actuator.id) ?? 0);
+      slider.disabled = !manualSources.has(entity.id) || !activeActuatorIds.has(actuator.id);
+      const value = document.createElement('output');
+      value.textContent = slider.value;
+      slider.addEventListener('input', () => {
+        manualSources.get(entity.id)?.set(actuator.id, actuator.kind === 'tension' ? 'tension' : 'joint', Number(slider.value));
+        value.textContent = slider.value;
+      });
+      row.append(caption, slider, value);
+      controlRows.append(row);
+    }
+    }
     sensorChoice.textContent = '';
     if (!(blueprint.sensors?.length)) addOption(sensorChoice, '', '无传感器');
     for (const [index, sensor] of (blueprint.sensors ?? []).entries()) addOption(sensorChoice, sensor.id, `传感器 ${index + 1}`);
     if (!blueprintDraftDirty) blueprintJson.value = JSON.stringify(blueprint, null, 2);
     inspectionJson.textContent = JSON.stringify(inspection, null, 2);
     if (!partDraftDirty) renderPartEditor(blueprint);
+    const selectedPart = blueprint.parts.find((entry) => entry.id === selectedPartId);
+    const selectedMaterial = blueprint.materials.find((entry) => entry.id === selectedPart?.materialId);
+    if (selectedMaterial && !materialDraftDirty) {
+      materialFriction.value = String(selectedMaterial.friction);
+      materialDensity.value = String(selectedMaterial.density);
+      materialYieldForce.value = selectedMaterial.yieldForceN === undefined ? '' : String(selectedMaterial.yieldForceN);
+      materialUltimateForce.value = selectedMaterial.ultimateForceN === undefined ? '' : String(selectedMaterial.ultimateForceN);
+    }
     const selectedConnection = allConnections.find(({ connection }) => connection.id === selectedConnectionId);
+    if (selectedConnection && !connectionDraftDirty) {
+      connectionKind.value = selectedConnection.connection.kind;
+      setVector(fromAnchorInputs, selectedConnection.connection.fromAnchor);
+      setVector(toAnchorInputs, selectedConnection.connection.toAnchor);
+      if (selectedConnection.connection.kind !== 'rigid') {
+        setVector(axisInputs, selectedConnection.connection.axis);
+        limitMin.value = String(selectedConnection.connection.limits?.min ?? -1);
+        limitMax.value = String(selectedConnection.connection.limits?.max ?? 1);
+      }
+      connectionStrength.value = selectedConnection.connection.strengthImpulseNs === undefined ? '' : String(selectedConnection.connection.strengthImpulseNs);
+    }
+    const damage = selectedConnection ? inspection.damage.connections[selectedConnection.connection.id] : undefined;
+    const load = selectedConnection && damage?.connected ? world.readConnectionLoad?.(entity.id, selectedConnection.connection.id) : undefined;
     connectionInspection.textContent = selectedConnection
-      ? JSON.stringify({ ...selectedConnection.connection, detached: selectedConnection.detached,
-        damage: inspection.damage.connections[selectedConnection.connection.id]?.damage ?? null }, null, 2)
-      : '选择连接后可在高级调试中查看其内部信息。';
+      ? `${selectedConnection.detached || !damage?.connected ? '已分离 / 当前无载荷读数' : '已连接'}\n损伤：${damageLabel(damage?.damage.state)} · 变形：${damage?.damage.deformation ?? 0}\n${load ? `当前力 ${load.forceN.toFixed(2)} N · 扭矩 ${load.torqueNm.toFixed(2)} N·m` : '当前无载荷读数'}`
+      : '请选择连接。';
+    connectionRaw.textContent = selectedConnection ? JSON.stringify(selectedConnection.connection, null, 2) : '';
     detachButton.disabled = !selectedConnection || selectedConnection.detached;
     reattachButton.disabled = !selectedConnection || !selectedConnection.detached;
     removeConnectionButton.disabled = !selectedConnection || selectedConnection.detached;
     repairConnectionButton.disabled = !selectedConnection || selectedConnection.detached;
-    addActuatorButton.disabled = !selectedConnection || selectedConnection.detached;
-    repairPartButton.disabled = !selectedPartId;
+    addActuatorButton.disabled = !energy || blueprint.parts.length < 2 || (actuatorKind.value !== 'tension' && !blueprint.connections.some((entry) => entry.kind !== 'rigid'));
+    updateActuatorButton.disabled = !selectedActuatorId;
+    updateConnectionButton.disabled = !selectedConnection || selectedConnection.detached;
+    repairPartButton.disabled = !selectedPartId || !editing();
     impactButton.disabled = !selectedComponentId || !selectedPartId
       || !components.some((component) => component.id === selectedComponentId && component.partIds.includes(selectedPartId!));
     applyPartButton.disabled = !selectedPartId;
@@ -779,6 +1062,9 @@ export function mountGodSandboxPanel(
     removeActuatorButton.disabled = !(blueprint.actuators?.length);
     removeSensorButton.disabled = !(blueprint.sensors?.length);
     setDisabled(false);
+    editGroup.disabled = !editing();
+    blueprintEditor.disabled = !editing();
+    options.onSelectionChanged?.(selectedEntityId, selectedPartId);
   }
 
   function renderPartEditor(blueprint: Blueprint): void {
@@ -841,17 +1127,26 @@ export function mountGodSandboxPanel(
   partChoice.addEventListener('change', () => {
     selectedPartId = selectedValue(partChoice);
     partDraftDirty = false;
+    materialDraftDirty = false;
     renderInspection();
   });
-  connectionChoice.addEventListener('change', () => { selectedConnectionId = selectedValue(connectionChoice); renderInspection(); });
+  connectionChoice.addEventListener('change', () => { selectedConnectionId = selectedValue(connectionChoice); connectionDraftDirty = false; renderInspection(); });
+  actuatorChoice.addEventListener('change', () => { selectedActuatorId = selectedValue(actuatorChoice); actuatorDraftDirty = false; renderInspection(); });
   componentChoice.addEventListener('change', () => { selectedComponentId = selectedValue(componentChoice); renderInspection(); });
 
   function refresh(): void {
-    pauseButton.textContent = world.paused ? '继续运行' : '暂停';
+    pauseButton.textContent = world.paused ? '进入运行模式' : '暂停并进入编辑模式';
+    modeSummary.textContent = world.paused ? '编辑模式 · 物理暂停' : '运行模式 · 结构编辑已锁定';
+    createGroup.disabled = !editing();
+    stepButton.disabled = !editing();
     renderEntityOptions();
     renderInspection();
   }
 
+  if (world.listEntities().length === 0 && catalog.some((entry) => entry.id === 'tension-mechanism')) {
+    blueprintChoice.value = 'tension-mechanism';
+    spawnTemplate();
+  }
   refresh();
   return {
     element: root,

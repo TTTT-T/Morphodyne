@@ -3,7 +3,7 @@ import { createDamageState, type DamageEvent, type StructuralDamageState } from 
 import type { EnvironmentSpec } from '../core/environment';
 import { validateBlueprint, type Blueprint, type Entity, type EntityId, type Pose, type Vector3 } from '../core/model';
 import { deriveStructuralComponents } from '../core/structureOwnership';
-import type { PhysicsAdapter } from '../physics/PhysicsAdapter';
+import type { ConnectionLoad, PhysicalContact, PhysicsAdapter } from '../physics/PhysicsAdapter';
 import type { PhysicsBody } from '../physics/PhysicsBody';
 import { FixedStepSimulation } from './FixedStepSimulation';
 import { EnvironmentRuntime, type PartEnvironmentView, type PhysicalPartView } from './EnvironmentRuntime';
@@ -261,6 +261,27 @@ export class WorldRuntime {
   /** Debug/inspection state. Agent control does not receive this world truth. */
   inspectEnergy(entityId: EntityId): EnergyState | undefined {
     return this.requireEntity(entityId).energy?.state;
+  }
+
+  /** Debug inspection of the latest completed physics step; never fed to Agent control. */
+  readConnectionLoad(entityId: EntityId, connectionId: string): ConnectionLoad | undefined {
+    const record = this.requireEntity(entityId);
+    if (!record.body.connectionHandles.has(connectionId)) return undefined;
+    return this.physics.readConnectionLoad(record.body, connectionId);
+  }
+
+  /** Debug-only physical contact samples for a selected Part. */
+  readPartContacts(entityId: EntityId, partId: string): readonly PhysicalContact[] {
+    const record = this.requireEntity(entityId);
+    if (!record.body.partHandles.has(partId)) return [];
+    return this.physics.readPartContacts(record.body, partId);
+  }
+
+  /** Debug-only velocity at the selected Part origin. */
+  readPartVelocity(entityId: EntityId, partId: string): Vector3 | undefined {
+    const record = this.requireEntity(entityId);
+    const handle = record.body.partHandles.get(partId);
+    return handle === undefined ? undefined : this.physics.readPointVelocity(handle, { x: 0, y: 0, z: 0 });
   }
 
   /** Debug truth only; Agent control receives observations through SensorRuntime. */
