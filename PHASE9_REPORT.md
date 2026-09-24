@@ -39,4 +39,4 @@ The four reproducible experiments live in `src/tools/phase9StructuralLoad.test.t
 - Diff reviewed for semantic ability flags, fixture logic in Core/Physics, unrelated files, and generated output. None were introduced.
 - Windows validation was not run; Phase 9 acceptance is established on the primary Mac runtime. No UI-specific behavior changed.
 
-Review branch: `codex/phase-9-structural-load`, targeting `main`. The pull request and final commit identifiers are recorded in GitHub and the final handoff.
+Review branch: `codex/phase-9-structural-load`, targeting `main`. Implementation and validation commit: `409ad74`. Review pull request: [#14](https://github.com/TTTT-T/Morphodyne/pull/14). This report metadata is a follow-up documentation commit on the same branch.
