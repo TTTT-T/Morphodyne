@@ -12,3 +12,5 @@
 .arena-fighters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .arena-fighters article { min-width: 0; display: grid; gap: 4px; padding: 9px; background: #26333c; border-radius: 6px; color: #c6d1d6; font-size: 11px; }
 .arena-fighters strong { color: #fff; font-size: 13px; }
+.arena-fighters .rammer { border-left: 3px solid #d46a40; }
+.arena-fighters .gripper { border-left: 3px solid #42b6c1; }

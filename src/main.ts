@@ -8,6 +8,7 @@ import { WorldRuntime } from './simulation/WorldRuntime';
 import { mountGodSandboxPanel } from './tools/GodSandboxPanel';
 import { createArenaSession } from './tools/ArenaSession';
 import { mountArenaPanel, type ArenaPanelHandle } from './tools/ArenaPanel';
+import { arenaPartVisual } from './tools/ArenaVisuals';
 
 const ROTATION = { x: 0, y: 0, z: 0, w: 1 } as const;
 const WORKBENCH: EnvironmentSpec = {
@@ -148,10 +149,13 @@ async function runArena(app: HTMLElement, renderer: ThreeSmokeRenderer): Promise
     renderer.clearWorldVisuals();
     renderedHandles = new Set<number>();
     renderer.frameArena();
+    renderer.setDaylightFactor(1);
     for (const surface of session.world.environment.listSurfaces()) {
       renderer.addEnvironmentSurface(surface.id, surface.halfExtents,
-        { position: surface.position, rotation: surface.rotation ?? ROTATION }, 0x485862);
+        { position: surface.position, rotation: surface.rotation ?? ROTATION },
+        surface.id === 'arena-floor' ? 0x29343a : 0x4c6067);
     }
+    renderer.addArenaMarkings();
     for (const entity of session.world.listEntities()) {
       const blueprint = session.world.readBlueprint(entity.id);
       const body = session.world.getPhysicsBody(entity.id);
@@ -159,7 +163,8 @@ async function runArena(app: HTMLElement, renderer: ThreeSmokeRenderer): Promise
         const handle = body.partHandles.get(part.id);
         if (handle === undefined) continue;
         renderedHandles.add(handle);
-        renderer.addPart(handle, part.geometry, entity.id === 'rammer' ? 0xd8874e : 0x73a8d1);
+        renderer.addPart(handle, part.geometry, entity.id === 'rammer' ? 0xd8874e : 0x73a8d1,
+          arenaPartVisual(part.id));
         renderer.setPose(handle, body.readPartPose(part.id));
       }
     }
@@ -190,9 +195,13 @@ async function runArena(app: HTMLElement, renderer: ThreeSmokeRenderer): Promise
     }
     for (const entity of session.world.listEntities()) {
       const body = session.world.getPhysicsBody(entity.id);
+      const damage = session.world.getDamageRuntime(entity.id).state;
       for (const part of session.world.readBlueprint(entity.id).parts) {
         const handle = body.partHandles.get(part.id);
-        if (handle !== undefined && renderedHandles.has(handle)) renderer.setPose(handle, body.readPartPose(part.id));
+        if (handle !== undefined && renderedHandles.has(handle)) {
+          renderer.setPose(handle, body.readPartPose(part.id));
+          renderer.setPartCondition(handle, damage.parts[part.id]?.damage.state ?? 'intact');
+        }
       }
     }
     renderer.render();

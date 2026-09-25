@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
+import type { DamageCondition } from '../core/damage';
 import type { Geometry, Pose, Vector3 } from '../core/model';
+import type { PartVisual, VisualPiece } from './PartVisual';
 
 /** Presentation status supplied by the world-facing caller for debug overlays. */
 export type DebugVisualStatus =
@@ -28,7 +30,9 @@ export class ThreeSmokeRenderer {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 200);
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true });
-  private readonly meshes = new Map<number, THREE.Mesh>();
+  private readonly meshes = new Map<number, THREE.Group>();
+  private readonly partConditions = new Map<number, DamageCondition>();
+  private arenaMarkings?: THREE.Group;
   private readonly debugRays = new Map<string, THREE.Line>();
   private readonly debugConnections = new Map<string, THREE.Line>();
   private readonly debugActuators = new Map<string, THREE.Line>();
@@ -92,7 +96,13 @@ export class ThreeSmokeRenderer {
   }
 
   /** Add the presentation shape for one runtime Part. Physics owns its pose. */
-  addPart(handle: number, geometry: Geometry, color: number): void {
+  addPart(handle: number, geometry: Geometry, color: number, visual?: PartVisual): void {
+    if (visual) {
+      const group = new THREE.Group();
+      for (const piece of visual.pieces) group.add(this.createVisualPiece(piece));
+      this.addAssembly(handle, group);
+      return;
+    }
     let threeGeometry: THREE.BufferGeometry;
     switch (geometry.kind) {
       case 'box':
@@ -125,14 +135,13 @@ export class ThreeSmokeRenderer {
   }
 
   removePart(handle: number): void {
-    const mesh = this.meshes.get(handle);
-    if (!mesh) return;
-    this.scene.remove(mesh);
-    mesh.geometry.dispose();
-    if (Array.isArray(mesh.material)) mesh.material.forEach((material) => material.dispose());
-    else mesh.material.dispose();
+    const group = this.meshes.get(handle);
+    if (!group) return;
+    this.scene.remove(group);
+    this.disposeAssembly(group);
     this.meshes.delete(handle);
     this.highlightedParts.delete(handle);
+    this.partConditions.delete(handle);
   }
 
   /** Highlight one Part mesh supplied by the world-to-render mapping. */
@@ -151,14 +160,14 @@ export class ThreeSmokeRenderer {
   setPartHighlight(handle: number, highlighted: boolean): void {
     if (highlighted) this.highlightedParts.add(handle);
     else this.highlightedParts.delete(handle);
-    const mesh = this.meshes.get(handle);
-    if (!mesh) return;
-    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const material of materials) {
-      if (!(material instanceof THREE.MeshStandardMaterial)) continue;
-      material.emissive.setHex(highlighted ? 0xffd166 : 0x000000);
-      material.emissiveIntensity = highlighted ? 0.8 : 0;
-    }
+    this.updatePartAppearance(handle);
+  }
+
+  /** Existing structural state drives presentation; this never writes back to the world. */
+  setPartCondition(handle: number, condition: DamageCondition): void {
+    if (this.partConditions.get(handle) === condition) return;
+    this.partConditions.set(handle, condition);
+    this.updatePartAppearance(handle);
   }
 
   /** Display a sensor sample supplied by the simulation. Rendering never performs a query. */
@@ -255,12 +264,47 @@ export class ThreeSmokeRenderer {
     for (const id of [...this.debugActuators.keys()]) this.removeDebugActuator(id);
     for (const id of [...this.tensionDebugVisuals.keys()]) this.removeTensionAttachmentPoints(id);
     for (const id of [...this.environmentMeshes.keys()]) this.removeEnvironmentMesh(id);
+    if (this.arenaMarkings) {
+      this.scene.remove(this.arenaMarkings);
+      this.disposeAssembly(this.arenaMarkings);
+      this.arenaMarkings = undefined;
+    }
     this.setSelectedPart(undefined);
   }
 
   frameArena(): void {
-    this.camera.position.set(0, 8, 15);
-    this.camera.lookAt(0, 0.8, 0);
+    this.camera.fov = 50;
+    this.camera.updateProjectionMatrix();
+    this.camera.position.set(-4.6, 5.4, 7.8);
+    this.camera.lookAt(0, 0.3, 0);
+  }
+
+  /** Flat graphics lie above the real floor; the arena's colliders remain world-owned. */
+  addArenaMarkings(): void {
+    if (this.arenaMarkings) return;
+    const group = new THREE.Group();
+    const stripe = (width: number, depth: number, x: number, z: number, color: number, opacity: number): void => {
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, depth),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide }));
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(x, 0.012, z);
+      group.add(mesh);
+    };
+    stripe(0.035, 10.45, 0, 0, 0xe7d5a4, 0.8);
+    stripe(0.06, 10.5, -7.2, 0, 0xe7d5a4, 0.55);
+    stripe(0.06, 10.5, 7.2, 0, 0xe7d5a4, 0.55);
+    stripe(14.4, 0.06, 0, -5.2, 0xe7d5a4, 0.55);
+    stripe(14.4, 0.06, 0, 5.2, 0xe7d5a4, 0.55);
+    for (const [x, color] of [[-2.3, 0xd46a40], [2.3, 0x42b6c1]]) {
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.82, 0.85, 48),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.72, side: THREE.DoubleSide, depthWrite: false }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(x, 0.013, 0);
+      group.add(ring);
+      stripe(0.62, 0.035, x, 0, color, 0.85);
+    }
+    this.arenaMarkings = group;
+    this.scene.add(group);
   }
 
   private resize(): void {
@@ -270,29 +314,74 @@ export class ThreeSmokeRenderer {
   }
 
   private addMesh(handle: number, geometry: THREE.BufferGeometry, color: number): void {
-    const previous = this.meshes.get(handle);
-    if (previous) {
-      this.scene.remove(previous);
-      previous.geometry.dispose();
-      if (Array.isArray(previous.material)) {
-        previous.material.forEach((material) => material.dispose());
-      } else {
-        previous.material.dispose();
-      }
-    }
-    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color }));
-    if (this.highlightedParts.has(handle)) this.setMeshHighlight(mesh, true);
-    this.meshes.set(handle, mesh);
-    this.scene.add(mesh);
+    const group = new THREE.Group();
+    const material = new THREE.MeshStandardMaterial({ color });
+    material.userData.baseColor = color;
+    group.add(new THREE.Mesh(geometry, material));
+    this.addAssembly(handle, group);
   }
 
-  private setMeshHighlight(mesh: THREE.Mesh, highlighted: boolean): void {
-    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const material of materials) {
-      if (!(material instanceof THREE.MeshStandardMaterial)) continue;
-      material.emissive.setHex(highlighted ? 0xffd166 : 0x000000);
-      material.emissiveIntensity = highlighted ? 0.8 : 0;
+  private addAssembly(handle: number, group: THREE.Group): void {
+    const highlighted = this.highlightedParts.has(handle);
+    const condition = this.partConditions.get(handle);
+    this.removePart(handle);
+    if (highlighted) this.highlightedParts.add(handle);
+    if (condition) this.partConditions.set(handle, condition);
+    this.meshes.set(handle, group);
+    this.scene.add(group);
+    this.updatePartAppearance(handle);
+  }
+
+  private createVisualPiece(piece: VisualPiece): THREE.Mesh {
+    let geometry: THREE.BufferGeometry;
+    switch (piece.shape.kind) {
+      case 'box': geometry = new THREE.BoxGeometry(piece.shape.size.x, piece.shape.size.y, piece.shape.size.z); break;
+      case 'sphere': geometry = new THREE.SphereGeometry(piece.shape.radius, 20, 12); break;
+      case 'cylinder': geometry = new THREE.CylinderGeometry(piece.shape.radius, piece.shape.radius, piece.shape.depth, 24); break;
+      case 'cone': geometry = new THREE.ConeGeometry(piece.shape.radius, piece.shape.height, 20); break;
     }
+    const material = new THREE.MeshStandardMaterial({ color: piece.color,
+      metalness: piece.metalness ?? 0.4, roughness: piece.roughness ?? 0.5,
+      emissive: piece.emissive ?? 0x000000, emissiveIntensity: piece.emissiveIntensity ?? 0 });
+    material.userData.baseColor = piece.color;
+    material.userData.baseEmissive = piece.emissive ?? 0x000000;
+    material.userData.baseEmissiveIntensity = piece.emissiveIntensity ?? 0;
+    const mesh = new THREE.Mesh(geometry, material);
+    if (piece.position) mesh.position.set(piece.position.x, piece.position.y, piece.position.z);
+    if (piece.rotation) mesh.rotation.set(piece.rotation.x, piece.rotation.y, piece.rotation.z);
+    return mesh;
+  }
+
+  private updatePartAppearance(handle: number): void {
+    const group = this.meshes.get(handle);
+    if (!group) return;
+    const condition = this.partConditions.get(handle) ?? 'intact';
+    const highlighted = this.highlightedParts.has(handle);
+    group.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const material = object.material;
+      if (!(material instanceof THREE.MeshStandardMaterial)) return;
+      const baseColor = material.userData.baseColor as number | undefined;
+      const baseEmissive = material.userData.baseEmissive as number | undefined;
+      if (baseColor !== undefined) material.color.setHex(baseColor);
+      if (condition === 'degraded') material.color.lerp(new THREE.Color(0xff9b42), 0.35);
+      if (condition === 'fractured' || condition === 'separated') material.color.multiplyScalar(0.48);
+      material.emissive.setHex(highlighted ? 0xffd166
+        : condition === 'fractured' || condition === 'separated' ? 0xc12827
+          : condition === 'degraded' ? 0xff6f26 : baseEmissive ?? 0);
+      material.emissiveIntensity = highlighted ? 0.8
+        : condition === 'fractured' || condition === 'separated' ? 0.38
+          : condition === 'degraded' ? 0.27 : (material.userData.baseEmissiveIntensity as number | undefined) ?? 0;
+    });
+  }
+
+  private disposeAssembly(group: THREE.Group): void {
+    group.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      object.geometry.dispose();
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) material.dispose();
+    });
   }
 
   private setDebugLine(

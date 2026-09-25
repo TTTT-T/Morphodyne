@@ -79,6 +79,7 @@ export function mountArenaPanel(
     status.textContent = observation.ended ? `本局结束：${observation.reason ?? '未指定原因'}` : (world.paused ? '已暂停' : '对抗进行中');
     fighters.replaceChildren(...observation.fighters.map((fighter) => {
       const card = document.createElement('article');
+      if (fighter.entityId === 'rammer' || fighter.entityId === 'gripper') card.className = fighter.entityId;
       card.innerHTML = `<strong></strong><span></span><span></span><span></span>`;
       const [title, position, structure, motion] = [...card.children] as HTMLElement[];
       title.textContent = fighter.entityId === 'rammer' ? 'Rammer · 玩家' : fighter.entityId === 'gripper' ? 'Gripper · 对手' : fighter.entityId;
