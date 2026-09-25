@@ -1,5 +1,8 @@
 import type { Vector3 } from '../core/model';
 import type { PartVisual, VisualPiece } from '../rendering/PartVisual';
+import { leopardPartVisual } from './LeopardVisuals';
+
+export { leopardPartVisual } from './LeopardVisuals';
 
 const v = (x: number, y: number, z: number): Vector3 => ({ x, y, z });
 const box = (size: Vector3, position: Vector3, color: number, metalness = 0.55): VisualPiece =>
@@ -89,6 +92,9 @@ function jaw(side: 'left' | 'right'): PartVisual {
 
 /** Fixture IDs select only appearance; all movement and failure still come from physical Parts. */
 export function arenaPartVisual(partId: string): PartVisual | undefined {
+  const leopard = leopardPartVisual(partId);
+  if (leopard) return leopard;
+
   switch (partId) {
     case 'rammer-chassis': return rammerChassis;
     case 'rammer-nose': return rammerNose;

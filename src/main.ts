@@ -163,7 +163,7 @@ async function runArena(app: HTMLElement, renderer: ThreeSmokeRenderer): Promise
         const handle = body.partHandles.get(part.id);
         if (handle === undefined) continue;
         renderedHandles.add(handle);
-        renderer.addPart(handle, part.geometry, entity.id === 'rammer' ? 0xd8874e : 0x73a8d1,
+        renderer.addPart(handle, part.geometry, entity.id === 'leopard-a' ? 0xd8a354 : 0xc68b3c,
           arenaPartVisual(part.id));
         renderer.setPose(handle, body.readPartPose(part.id));
       }
@@ -171,10 +171,8 @@ async function runArena(app: HTMLElement, renderer: ThreeSmokeRenderer): Promise
   };
   const mount = (): void => {
     panel?.destroy();
-    panel = mountArenaPanel(app, session.world, session.player, session.observer, async () => {
-      const previous = session;
+    panel = mountArenaPanel(app, session.world, session.observer, async () => {
       session = await createArenaSession();
-      previous.player.clear();
       drawSession();
       mount();
     });

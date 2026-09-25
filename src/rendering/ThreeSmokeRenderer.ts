@@ -337,6 +337,7 @@ export class ThreeSmokeRenderer {
     switch (piece.shape.kind) {
       case 'box': geometry = new THREE.BoxGeometry(piece.shape.size.x, piece.shape.size.y, piece.shape.size.z); break;
       case 'sphere': geometry = new THREE.SphereGeometry(piece.shape.radius, 20, 12); break;
+      case 'ellipsoid': geometry = new THREE.SphereGeometry(1, 24, 16); break;
       case 'cylinder': geometry = new THREE.CylinderGeometry(piece.shape.radius, piece.shape.radius, piece.shape.depth, 24); break;
       case 'cone': geometry = new THREE.ConeGeometry(piece.shape.radius, piece.shape.height, 20); break;
     }
@@ -347,6 +348,7 @@ export class ThreeSmokeRenderer {
     material.userData.baseEmissive = piece.emissive ?? 0x000000;
     material.userData.baseEmissiveIntensity = piece.emissiveIntensity ?? 0;
     const mesh = new THREE.Mesh(geometry, material);
+    if (piece.shape.kind === 'ellipsoid') mesh.scale.set(piece.shape.radii.x, piece.shape.radii.y, piece.shape.radii.z);
     if (piece.position) mesh.position.set(piece.position.x, piece.position.y, piece.position.z);
     if (piece.rotation) mesh.rotation.set(piece.rotation.x, piece.rotation.y, piece.rotation.z);
     return mesh;

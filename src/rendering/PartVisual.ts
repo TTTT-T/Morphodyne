@@ -4,6 +4,7 @@ import type { Vector3 } from '../core/model';
 export type VisualShape =
   | { readonly kind: 'box'; readonly size: Vector3 }
   | { readonly kind: 'sphere'; readonly radius: number }
+  | { readonly kind: 'ellipsoid'; readonly radii: Vector3 }
   | { readonly kind: 'cylinder'; readonly radius: number; readonly depth: number }
   | { readonly kind: 'cone'; readonly radius: number; readonly height: number };
 

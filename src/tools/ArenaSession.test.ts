@@ -1,88 +1,112 @@
 import { describe, expect, it } from 'vitest';
 import { createArenaSession } from './ArenaSession';
 
-describe('Arena v0.1 physical session', () => {
-  it('moves, collides, fractures, loses an actuator and resets all match state', async () => {
-    const first = await createArenaSession();
-    const world = first.world;
-    expect(world.listEntities().map((entity) => entity.id)).toEqual(['rammer', 'gripper']);
-    expect(world.paused).toBe(true);
-    expect(world.inspectEntity('rammer')!.actuatorIds).toHaveLength(2);
-    expect(world.inspectEntity('gripper')!.actuatorIds).toHaveLength(4);
-    first.player.set('rammer-left-drive', 'joint', -1);
-    first.player.set('rammer-right-drive', 'joint', -1);
-
-    const start = world.readPartPose('rammer', 'rammer-chassis').position.x;
-    let fighterContactTicks = 0;
-    let peakNoseForceN = 0;
-    let peakJawForceN = 0;
-    let firstFractureTick: number | undefined;
-    let firstSeparationTick: number | undefined;
-    let jawContactAtFracture = false;
-    for (let i = 0; i < 240; i += 1) {
-      world.stepOnce();
-      const nose = world.readPartContactLoad('rammer', 'rammer-nose')!;
-      const jaw = world.readPartContactLoad('gripper', 'gripper-left-jaw')!;
-      peakNoseForceN = Math.max(peakNoseForceN, nose.forceN);
-      peakJawForceN = Math.max(peakJawForceN, jaw.forceN);
-      if (world.readPartContacts('rammer', 'rammer-nose').some(({ point }) => point.y > 0.25)) fighterContactTicks++;
-      const damage = world.getDamageRuntime('gripper').state;
-      if (firstFractureTick === undefined && damage.parts['gripper-left-jaw'].damage.state === 'fractured') {
-        firstFractureTick = world.tick;
-        jawContactAtFracture = world.readPartContacts('gripper', 'gripper-left-jaw')
-          .some(({ point }) => point.y > 0.25);
-      }
-      if (firstSeparationTick === undefined && !damage.connections['gripper-left-slide'].connected) {
-        firstSeparationTick = world.tick;
-      }
+describe('Animal Arena v0.2 autonomous session', () => {
+  it('spawns two independently sensed and controlled physical Leopard Agents', async () => {
+    const session = await createArenaSession();
+    const { world, agents } = session;
+    expect(world.listEntities().map((entity) => entity.id)).toEqual(['leopard-a', 'leopard-b']);
+    expect(world.paused).toBe(false);
+    expect(agents.get('leopard-a')).not.toBe(agents.get('leopard-b'));
+    for (const id of ['leopard-a', 'leopard-b']) {
+      const entity = world.inspectEntity(id)!;
+      expect(entity.agentPresent).toBe(true);
+      expect(entity.partIds).toHaveLength(20);
+      expect(entity.sensorIds.length).toBeGreaterThanOrEqual(6);
+      expect(entity.actuatorIds.length).toBeGreaterThanOrEqual(8);
+      expect(world.readBlueprint(id).parts.some((part) => part.id === 'leopard-jaw')).toBe(true);
+      expect(world.inspectEnergy(id)!.remainingEnergyJ).toBe(12000);
     }
-    const observation = first.observer.observe(world);
-    console.info('Arena v0.1 physical trial', {
-      initialSeparationM: 4.6,
-      rammerAdvanceM: world.readPartPose('rammer', 'rammer-chassis').position.x - start,
-      fighterContactTicks, peakNoseForceN, peakJawForceN,
-      firstFractureTick, firstSeparationTick, jawContactAtFracture,
-      gripper: observation.fighters[1],
-    });
-    expect(world.readPartPose('rammer', 'rammer-chassis').position.x - start).toBeGreaterThan(0.5);
-    expect(world.inspectEnergy('rammer')!.consumedEnergyJ).toBeGreaterThan(0);
-    expect(world.inspectEnergy('gripper')!.consumedEnergyJ).toBeGreaterThan(0);
-    expect(fighterContactTicks).toBeGreaterThan(0);
-    expect(peakNoseForceN).toBeGreaterThan(0);
-    expect(peakJawForceN).toBeGreaterThan(0);
-    expect(firstFractureTick).toBeGreaterThan(0);
-    expect(firstSeparationTick).toBe(firstFractureTick);
-    expect(jawContactAtFracture).toBe(true);
-    expect(observation.fighters[1].fracturedParts).toBeGreaterThan(0);
-    expect(observation.fighters[1].separatedConnections).toBeGreaterThan(0);
-    expect(observation.fighters[1].activeActuators).toBeLessThan(4);
-
-    const next = await createArenaSession();
-    expect(next.world.tick).toBe(0);
-    expect(next.world.listEntities().map((entity) => entity.id)).toEqual(['rammer', 'gripper']);
-    expect(next.world.inspectEnergy('rammer')!.consumedEnergyJ).toBe(0);
-    expect(next.world.inspectEntity('gripper')!.actuatorIds).toHaveLength(4);
-    expect(next.observer.observe(next.world).fighters.every((fighter) => fighter.fracturedParts === 0)).toBe(true);
-    expect(next.player.get('rammer-left-drive')).toBe(0);
+    expect(world.readSensorRuntime('leopard-a')).not.toBe(world.readSensorRuntime('leopard-b'));
+    for (let i = 0; i < 5; i += 1) world.stepOnce();
+    expect(agents.get('leopard-a')!.inspect().perceptionTick).toBeGreaterThanOrEqual(0);
+    expect(agents.get('leopard-b')!.inspect().perceptionTick).toBeGreaterThanOrEqual(0);
+    expect(agents.get('leopard-a')!.inspectDecisionHistory().length).toBeGreaterThan(0);
+    expect(agents.get('leopard-b')!.inspectDecisionHistory().length).toBeGreaterThan(0);
+    expect(session.observer.observe(world).fighters).toHaveLength(2);
   });
 
-  it('opponent approaches through wheel signals and observer reports only inspected state', async () => {
+  it('runs an autonomous physical trial with measured movement and jaw state', async () => {
     const session = await createArenaSession();
-    const initialX = session.world.readPartPose('gripper', 'gripper-chassis').position.x;
-    for (let i = 0; i < 90; i += 1) session.world.stepOnce();
-    const currentX = session.world.readPartPose('gripper', 'gripper-chassis').position.x;
-    const jawGap = session.world.readPartPose('gripper', 'gripper-right-jaw').position.z
-      - session.world.readPartPose('gripper', 'gripper-left-jaw').position.z;
-    expect(currentX).toBeLessThan(initialX - 0.2);
-    expect(jawGap).toBeLessThan(0.4);
-    expect(session.world.getDamageRuntime('gripper').state.connections['gripper-left-slide'].connected).toBe(true);
-    expect(session.world.getDamageRuntime('gripper').state.connections['gripper-right-slide'].connected).toBe(true);
-    const before = session.observer.observe(session.world);
-    expect(before.ended).toBe(false);
-    const manual = session.observer.observe(session.world, true);
-    expect(manual.ended).toBe(true);
-    expect(manual.reason).toBe('手动结束');
-    expect(session.world.paused).toBe(true);
-    expect(session.world.tick).toBe(90);
+    const { world } = session;
+    const initialA = world.readPartPose('leopard-a', 'leopard-chest').position;
+    const initialB = world.readPartPose('leopard-b', 'leopard-chest').position;
+    let minimumGap = Math.abs(initialB.x - initialA.x);
+    let opponentContactTicks = 0;
+    let firstOpponentContact: { tick: number; partId: string; otherPartId?: string; impulseNs: number } | undefined;
+    let minJawAngle = Infinity;
+    let maxJawAngle = -Infinity;
+    let firstHeadFractureTick: number | undefined;
+    let maxHeadImpulseNs = 0;
+    let opponentHeadContactBeforeFractureTicks = 0;
+    let jawOpponentContactBeforeFractureTicks = 0;
+    let deformationWhileOpponentsTouch = 0;
+    const aPartIds = world.inspectEntity('leopard-a')!.partIds;
+    for (let i = 0; i < 600; i += 1) {
+      world.stepOnce();
+      const a = world.readPartPose('leopard-a', 'leopard-chest').position;
+      const b = world.readPartPose('leopard-b', 'leopard-chest').position;
+      minimumGap = Math.min(minimumGap, Math.hypot(a.x - b.x, a.z - b.z));
+      const jawPerception = world.readSensorRuntime('leopard-a')!.readAgentView().perceptions
+        .find((p) => p.ownConnectionId === 'leopard-jaw-joint');
+      if (jawPerception) {
+        minJawAngle = Math.min(minJawAngle, jawPerception.values[0]);
+        maxJawAngle = Math.max(maxJawAngle, jawPerception.values[0]);
+      }
+      const headDamage = world.getDamageRuntime('leopard-a').state.parts['leopard-head'].damage;
+      if (headDamage.state === 'fractured' && firstHeadFractureTick === undefined) {
+        firstHeadFractureTick = world.tick;
+      }
+      if (headDamage.state !== 'fractured' && world.readPartContacts('leopard-a', 'leopard-head')
+        .some((contact) => contact.otherEntityId === 'leopard-b')) {
+        opponentHeadContactBeforeFractureTicks++;
+        deformationWhileOpponentsTouch = Math.max(deformationWhileOpponentsTouch, headDamage.deformation);
+      }
+      if (headDamage.state !== 'fractured' && world.readPartContacts('leopard-a', 'leopard-jaw')
+        .some((contact) => contact.otherEntityId === 'leopard-b')) jawOpponentContactBeforeFractureTicks++;
+      const headLoad = world.readPartContactLoad('leopard-a', 'leopard-head')!;
+      maxHeadImpulseNs = Math.max(maxHeadImpulseNs, headLoad.impulseNs);
+      for (const partId of aPartIds) {
+        const contact = world.readPartContacts('leopard-a', partId)
+          .find((item) => item.otherEntityId === 'leopard-b');
+        if (contact) {
+          opponentContactTicks++;
+          firstOpponentContact ??= { tick: world.tick, partId, otherPartId: contact.otherPartId,
+            impulseNs: contact.impulseNs };
+          break;
+        }
+      }
+    }
+    const observation = session.observer.observe(world);
+    expect(world.tick).toBe(600);
+    expect(minimumGap).toBeLessThan(Math.abs(initialB.x - initialA.x) - 1);
+    expect(firstOpponentContact?.tick).toBeGreaterThan(0);
+    expect(firstOpponentContact?.otherPartId).toBeDefined();
+    expect(opponentContactTicks).toBeGreaterThan(30);
+    expect(maxJawAngle - minJawAngle).toBeGreaterThan(0.2);
+    expect(firstHeadFractureTick).toBeGreaterThan(firstOpponentContact!.tick);
+    expect(opponentHeadContactBeforeFractureTicks).toBeGreaterThan(10);
+    expect(jawOpponentContactBeforeFractureTicks).toBeGreaterThan(0);
+    expect(deformationWhileOpponentsTouch).toBeGreaterThan(0);
+    expect(maxHeadImpulseNs).toBeGreaterThan(0);
+    expect(world.getDamageRuntime('leopard-a').state.parts['leopard-head'].damage.state).toBe('fractured');
+    expect(world.getDamageRuntime('leopard-a').state.connections['leopard-neck-head'].connected).toBe(false);
+    expect(world.readSensorRuntime('leopard-a')!.readAgentView().perceptions
+      .some((perception) => perception.sensorId === 'leopard-head-range')).toBe(false);
+    expect(session.agents.get('leopard-a')!.inspectDecisionHistory()
+      .some((decision) => decision.tick > firstHeadFractureTick!)).toBe(true);
+    expect(observation.fighters.every((fighter) => Number.isFinite(fighter.position.x))).toBe(true);
+    expect(observation.fighters.every((fighter) => fighter.decisionCount > 0)).toBe(true);
+  });
+
+  it('restarts with fresh physics, sensor, Brain, energy, and damage state', async () => {
+    const first = await createArenaSession();
+    for (let i = 0; i < 60; i += 1) first.world.stepOnce();
+    const next = await createArenaSession();
+    expect(next.world.tick).toBe(0);
+    expect(next.world.inspectEnergy('leopard-a')!.consumedEnergyJ).toBe(0);
+    expect(next.agents.get('leopard-a')!.inspectDecisionHistory()).toEqual([]);
+    expect(next.observer.observe(next.world).fighters.every((fighter) => fighter.fracturedParts === 0)).toBe(true);
+    expect(next.world.readSensorRuntime('leopard-a')).not.toBe(first.world.readSensorRuntime('leopard-a'));
   });
 });

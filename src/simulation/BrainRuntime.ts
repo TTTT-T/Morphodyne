@@ -65,5 +65,7 @@ export function skillIntentToControlIntent(intent: SkillIntent): ControlIntent {
     case 'stand': return { forward: 0, turn: 0 };
     case 'forward': return { forward: 1, turn: 0 };
     case 'turn': return { forward: 0, turn: Math.max(-1, Math.min(1, intent.turn ?? 1)) };
+    case 'approach': return { forward: 1, turn: Math.max(-1, Math.min(1, intent.turn ?? 0)) };
+    case 'interact': return { forward: 0.25, turn: Math.max(-1, Math.min(1, intent.turn ?? 0)) };
   }
 }

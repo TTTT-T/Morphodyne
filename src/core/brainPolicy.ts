@@ -12,7 +12,9 @@ export type GoalKind =
   | 'maintain-stability'
   | 'increase-distance'
   | 'investigate-unknown-return'
-  | 'continue-exploration';
+  | 'continue-exploration'
+  | 'approach-anonymous-return'
+  | 'interact-near-contact';
 
 export interface Goal {
   readonly kind: GoalKind;
@@ -20,7 +22,7 @@ export interface Goal {
   readonly desiredState: string;
 }
 
-export type SkillName = 'stand' | 'forward' | 'turn';
+export type SkillName = 'stand' | 'forward' | 'turn' | 'approach' | 'interact';
 
 /** A locally perceived opportunity to attempt a motor primitive. */
 export interface Affordance {
@@ -99,6 +101,8 @@ const GOALS: Readonly<Record<GoalKind, Goal>> = {
   'increase-distance': { kind: 'increase-distance', desiredState: 'greater distance from a nearby surface' },
   'investigate-unknown-return': { kind: 'investigate-unknown-return', desiredState: 'more information about an unknown return' },
   'continue-exploration': { kind: 'continue-exploration', desiredState: 'new local observations' },
+  'approach-anonymous-return': { kind: 'approach-anonymous-return', desiredState: 'closer to a sensed return' },
+  'interact-near-contact': { kind: 'interact-near-contact', desiredState: 'physical contact near the head' },
 };
 
 /** Deterministic short-horizon policy; physics remains responsible for outcomes. */

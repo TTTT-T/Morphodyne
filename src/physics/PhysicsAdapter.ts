@@ -15,6 +15,9 @@ export interface PhysicalContact {
   /** Contact point in world coordinates for sensor and debug observation. */
   readonly point: Vector3;
   readonly impulseNs: number;
+  /** Debug provenance. SensorRuntime omits it from Agent perceptions. */
+  readonly otherEntityId?: string;
+  readonly otherPartId?: string;
 }
 
 /** Solver contact load on one Part during the last completed step. */
@@ -90,7 +93,7 @@ export interface PhysicsAdapter {
   /** Estimated load at a live structural connection from the most recent completed step. */
   readConnectionLoad(body: PhysicsBody, connectionId: string): ConnectionLoad;
   readPartAngularVelocity(body: PhysicsBody, partId: string): Vector3;
-  /** First physical surface along a ray, excluding only the mounting Part collider. */
+  /** First physical surface along a ray, excluding Parts of the sensing structure. */
   castSensorRay(origin: Vector3, direction: Vector3, range: number, excludePartHandle: BodyHandle): RayHit | null;
   /**
    * Remove one runtime structural connection from the physics world. The

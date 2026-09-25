@@ -30,6 +30,7 @@ interface RuntimeConnection {
 }
 
 interface RuntimePhysicsBody {
+  readonly entityId: string;
   readonly partHandles: Map<string, BodyHandle>;
   readonly connections: Map<string, RuntimeConnection>;
   readonly connectionHandles: Map<string, number>;
@@ -446,6 +447,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       });
     }
     const runtimeBody: RuntimePhysicsBody = {
+      entityId: entity.id,
       partHandles,
       connections: runtimeConnections,
       connectionHandles,
@@ -675,8 +677,10 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     }
     const excluded = this.bodies.get(excludePartHandle);
     if (!excluded || !this.partRuntimeReferences.has(excludePartHandle)) throw new Error('Unknown mounting Part handle');
+    const owner = this.partRuntimeReferences.get(excludePartHandle)!.runtimeBody;
     const hit = this.world.castRay(new RAPIER.Ray(origin, direction), range, true,
-      undefined, undefined, undefined, excluded);
+      undefined, undefined, undefined, excluded,
+      (collider) => this.colliderRuntimeReferences.get(collider.handle)?.runtimeBody !== owner);
     if (!hit) return null;
     return {
       distance: hit.timeOfImpact,
@@ -819,11 +823,15 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       for (const [partId, collider] of runtimeBody.partColliders) {
         const contacts = runtimeBody.latestContacts.get(partId)!;
         this.world.contactPairsWith(collider, (other) => {
+          const otherReference = this.colliderRuntimeReferences.get(other.handle);
           this.world.contactPair(collider, other, (manifold) => {
             for (let i = 0; i < manifold.numSolverContacts(); i += 1) {
               const point = manifold.solverContactPoint(i);
               if (!point) continue;
-              contacts.push({ point: { x: point.x, y: point.y, z: point.z }, impulseNs: Math.max(0, manifold.contactImpulse(i)) });
+              contacts.push({ point: { x: point.x, y: point.y, z: point.z },
+                impulseNs: Math.max(0, manifold.contactImpulse(i)),
+                ...(otherReference ? { otherEntityId: otherReference.runtimeBody.entityId,
+                  otherPartId: otherReference.partId } : {}) });
             }
           });
         });

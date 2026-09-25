@@ -3,9 +3,8 @@ import { RapierPhysicsAdapter } from '../physics/RapierPhysicsAdapter';
 import { ConstructionRuntime } from '../simulation/ConstructionRuntime';
 import { WorldRuntime } from '../simulation/WorldRuntime';
 import { ArenaObserver } from './ArenaObserver';
-import { createArenaOpponent } from './ArenaOpponent';
-import { createGripperFighterBlueprint, createRammerBlueprint } from './ArenaFixtures';
-import { ManualControlSource } from './ManualControlSource';
+import { LeopardAgentRuntime } from './LeopardAgent';
+import { createLeopardBlueprint } from './LeopardBlueprint';
 
 const arenaEnvironment: EnvironmentSpec = {
   surfaces: [
@@ -26,7 +25,7 @@ const arenaEnvironment: EnvironmentSpec = {
 export interface ArenaSession {
   readonly world: WorldRuntime;
   readonly construction: ConstructionRuntime;
-  readonly player: ManualControlSource;
+  readonly agents: ReadonlyMap<string, LeopardAgentRuntime>;
   readonly observer: ArenaObserver;
 }
 
@@ -35,17 +34,18 @@ export async function createArenaSession(): Promise<ArenaSession> {
   const physics = await RapierPhysicsAdapter.create();
   const world = new WorldRuntime(physics, arenaEnvironment);
   const construction = new ConstructionRuntime(world);
-  const player = new ManualControlSource();
-  construction.spawn({ id: 'rammer', blueprint: createRammerBlueprint() }, {
-    origin: { x: -2.3, y: 0, z: 0 },
-    energy: { capacityJ: 8000, maxPowerWatts: 300, efficiency: 0.82 },
-    control: player.control,
-  });
-  construction.spawn({ id: 'gripper', blueprint: createGripperFighterBlueprint() }, {
-    origin: { x: 2.3, y: 0, z: 0 },
-    energy: { capacityJ: 8000, maxPowerWatts: 300, efficiency: 0.82 },
-    control: createArenaOpponent(world),
-  });
-  world.paused = true;
-  return { world, construction, player, observer: new ArenaObserver() };
+  const agents = new Map<string, LeopardAgentRuntime>();
+  for (const [id, x, z, facing] of [
+    ['leopard-a', -2.3, 0, 1], ['leopard-b', 2.3, 0.6, -1],
+  ] as const) {
+    const agent = new LeopardAgentRuntime();
+    agents.set(id, agent);
+    construction.spawn({ id, blueprint: createLeopardBlueprint({ facing }) }, {
+      origin: { x, y: 0, z },
+      energy: { capacityJ: 12000, maxPowerWatts: 650, efficiency: 0.82 },
+      agent: { control: (seconds) => agent.control(world.readSensorRuntime(id)?.readAgentView()
+        ?? { tick: -1, perceptions: [] }, seconds) },
+    });
+  }
+  return { world, construction, agents, observer: new ArenaObserver(agents) };
 }
