@@ -1,0 +1,14 @@
+.arena-panel {
+  position: fixed; z-index: 5; top: 16px; left: 16px; width: min(440px, calc(100vw - 32px));
+  padding: 14px; color: #edf2f3; background: rgb(20 27 34 / 94%); border: 1px solid #52616c;
+  border-radius: 10px; box-shadow: 0 8px 28px rgb(0 0 0 / 35%); font: 13px/1.45 system-ui, sans-serif;
+}
+.arena-panel header, .arena-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.arena-panel header strong { display: block; font-size: 17px; }
+.arena-panel header small { color: #afbec6; }
+.arena-panel button, .arena-panel select { color: inherit; background: #303e48; border: 1px solid #63737e; border-radius: 5px; padding: 6px 9px; }
+.arena-actions { justify-content: flex-start; flex-wrap: wrap; margin-top: 12px; color: #c5d0d5; }
+.arena-status { margin: 10px 0; color: #8de0bd; }
+.arena-fighters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.arena-fighters article { min-width: 0; display: grid; gap: 4px; padding: 9px; background: #26333c; border-radius: 6px; color: #c6d1d6; font-size: 11px; }
+.arena-fighters strong { color: #fff; font-size: 13px; }

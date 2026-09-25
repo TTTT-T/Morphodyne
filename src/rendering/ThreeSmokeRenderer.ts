@@ -247,6 +247,22 @@ export class ThreeSmokeRenderer {
     this.renderer.render(this.scene, this.camera);
   }
 
+  /** Remove all world supplied visuals before binding a fresh runtime. */
+  clearWorldVisuals(): void {
+    for (const handle of [...this.meshes.keys()]) this.removePart(handle);
+    for (const id of [...this.debugRays.keys()]) this.removeDebugRay(id);
+    for (const id of [...this.debugConnections.keys()]) this.removeDebugConnection(id);
+    for (const id of [...this.debugActuators.keys()]) this.removeDebugActuator(id);
+    for (const id of [...this.tensionDebugVisuals.keys()]) this.removeTensionAttachmentPoints(id);
+    for (const id of [...this.environmentMeshes.keys()]) this.removeEnvironmentMesh(id);
+    this.setSelectedPart(undefined);
+  }
+
+  frameArena(): void {
+    this.camera.position.set(0, 8, 15);
+    this.camera.lookAt(0, 0.8, 0);
+  }
+
   private resize(): void {
     this.camera.aspect = innerWidth / innerHeight;
     this.camera.updateProjectionMatrix();
@@ -358,6 +374,26 @@ export class ThreeSmokeRenderer {
     line.geometry.dispose();
     (line.material as THREE.Material).dispose();
     lines.delete(id);
+  }
+
+  private removeDebugRay(id: string): void {
+    const line = this.debugRays.get(id);
+    if (!line) return;
+    this.scene.remove(line);
+    line.geometry.dispose();
+    (line.material as THREE.Material).dispose();
+    this.debugRays.delete(id);
+  }
+
+  private removeEnvironmentMesh(id: string): void {
+    const mesh = this.environmentMeshes.get(id);
+    if (!mesh) return;
+    this.scene.remove(mesh);
+    mesh.geometry.dispose();
+    const material = mesh.material;
+    if (Array.isArray(material)) material.forEach((entry) => entry.dispose());
+    else material.dispose();
+    this.environmentMeshes.delete(id);
   }
 
   private debugStyle(status: DebugVisualStatus, baseColor: number): DebugVisualStyle {
