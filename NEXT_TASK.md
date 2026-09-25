@@ -1,576 +1,412 @@
-# NEXT TASK — v0.3 Phase 15：通用接触集中与压力代理（Geometry-Driven Contact Concentration）
+# NEXT TASK — Arena v0.1：先把 Morphodyne 变成可玩的斗兽场
 
-Phase 14 已通过并合并。
+当前 Phase 15（Contact Concentration）暂停，不删除其方向；只有当 Arena 实际暴露“尖/钝接触无法区分”为阻塞问题时再回来做。
 
-Morphodyne 现在已经能做到：
+本阶段目标不是继续扩底层理论，而是用现有 Morphodyne 规则做出第一个真正可玩的闭环：
 
-- 一个完全独立、没有 Connection 的 Part，可以因为真实外部接触而发生 Damage / Fracture；
-- 持续挤压可以通过真实 contact force 造成材料过载；
-- Part fracture 会让 incident Connections 失效；
-- 外部 Part contact 与内部 Connection reaction 已分流，避免同一次接触机械地重复扣两遍 Damage。
+> 两个由通用 Part / Connection / Actuator / Energy / Damage 规则构成的实体，在同一个 3D 场地中移动、接触、对抗，并因为真实物理过程出现结构损伤或失能。
 
-Phase 15 解决下一块基础问题：
-
-> **同样大小的接触力，如果作用在宽面、窄边或很小的接触区域上，材料后果不应该完全一样。**
-
-这是未来牙齿、爪、刀刃、尖头工具、机械压头能够从“几何形状”自然产生不同效果的必要底座。
-
-本 Phase 仍然不实现牙齿、爪、武器、攻击系统，也不允许添加任何语义伤害倍率。
+Arena v0.1 本身就是下一轮架构压力测试。
 
 ---
 
-## 1. 核心目标
-
-建立通用因果链：
-
-```text
-Geometry + Contact Manifold
-        ↓
-Measured Contact Force
-        ↓
-Effective Contact Concentration / Area Proxy
-        ↓
-Material Local Load
-        ↓
-Part Damage
-```
-
-必须保证：
-
-```text
-same total force
-+ different physical contact geometry
-→ different material response
-```
-
-而不是：
-
-```text
-sharp object
-→ damage multiplier
-```
-
----
-
-# 2. 开始前先调查 Rapier 能提供什么
-
-不要直接假定 Rapier JS 可以提供 contact area。
-
-先检查当前 Rapier 0.20.0 的公开 API 和现有 adapter，确认是否能可靠获得：
-
-- contact manifold；
-- solver contact points；
-- 每个接触点的位置；
-- contact normal；
-- per-contact force / impulse；
-- contact point 数量；
-- manifold 内接触点空间分布；
-- collider shape 信息。
-
-在 `PHASE15_REPORT.md` 中明确写：
-
-1. Rapier 直接提供什么；
-2. 不提供什么；
-3. 最终采用什么低精度 proxy；
-4. 为什么这个 proxy 仍然由实际几何与真实接触决定。
-
-禁止伪造“精确压力”。
-
----
-
-# 3. 第一版不是连续介质力学
-
-Phase 15 不做：
-
-- FEA；
-- stress tensor；
-- Hertz contact；
-- crack mechanics；
-- mesh deformation；
-- soft body；
-- penetration；
-- cutting；
-- slicing；
-- puncture。
-
-第一版只需要一个：
-
-> **通用、稳定、可解释的接触集中程度代理。**
-
-可以叫：
-
-- `contactConcentration`
-- `effectiveContactAreaM2`
-- `contactStressProxyPa`
-
-具体名称由实现决定。
-
-如果无法可靠得到平方米意义上的 area，就不要假装单位是 Pa。
-
-宁可使用明确命名的无量纲或近似指标，并文档化。
-
----
-
-# 4. 禁止 semantic sharpness
-
-生产 Core / Physics / Simulation 中禁止加入：
-
-- `sharpness`
-- `blade`
-- `tooth`
-- `fang`
-- `claw`
-- `weapon`
-- `piercing`
-- `cuttingPower`
-- `penetration`
-- `damageMultiplier`
-- `pressureBonus`
-
-也不要给 Blueprint 加：
-
-```text
-isSharp
-sharpness = 0.8
-```
-
-未来所谓“锋利”，必须来自实际 geometry 导致的小接触区域 / 高集中载荷。
-
----
-
-# 5. Contact observation
-
-Phase 14 的：
-
-```text
-PartContactLoad
-forceN
-impulseNs
-```
-
-继续作为总接触载荷。
-
-Phase 15 可以扩展一个新的只读物理观察，例如：
-
-```text
-ContactPatch
-ContactManifoldSummary
-PartContactConcentration
-```
-
-但它必须是 PhysicsAdapter 的 backend-neutral 数据。
-
-可能包含：
-
-- totalForceN；
-- totalImpulseNs；
-- contactPointCount；
-- world contact points；
-- characteristic span；
-- effectiveAreaProxy；
-- concentration proxy。
-
-不要让 Core 读 Rapier manifold。
-
----
-
-# 6. Proxy 设计原则
-
-如果 Rapier 没有真实 contact area，第一版可以从：
-
-- contact point 数量；
-- contact points 的空间分布；
-- collider geometry；
-- local contact position；
-- contact normal；
-
-构建低精度 estimator。
-
-要求：
-
-### A. Geometry-sensitive
-
-宽平面稳定接触与窄小接触必须得到不同 concentration。
-
-### B. Load-sensitive
-
-同一 geometry 下，更大的真实 contact force 必须提高 local load。
-
-### C. Scale-aware
-
-相同形状整体缩小时，不能完全得到与大型结构一样的局部接触尺度。
-
-### D. Backend-owned measurement
-
-几何接触估算在 PhysicsAdapter / physics measurement 层完成。
-
-Core 只消费一个通用物理量，不知道 box / sphere / capsule / tooth。
-
-### E. Stable enough
-
-不要让 contact point 数量的一帧抖动导致 Damage 瞬间几十倍变化。
-
-允许加入纯数值稳定处理：
-
-- minimum patch scale；
-- bounded smoothing；
-- manifold aggregation；
-
-但必须通用且不依赖 fixture。
-
----
-
-# 7. Material response
-
-不要创建一套新的 DamageState。
-
-继续使用 Phase 14 的 Part Damage。
-
-优先扩展 `PartLoad`，使 Core 能消费一个局部接触强度通道。
-
-例如：
-
-```text
-forceN
-impulseNs
-contactConcentration
-```
-
-或：
-
-```text
-localForceDensityProxy
-```
-
-Material 如果需要新增一个通用容量参数，必须非常克制。
-
-优先考虑：
-
-- 复用现有 `yieldForceN` / `ultimateForceN`；
-- 通过 concentration 对“局部有效载荷”进行通用转换。
-
-只有确实无法表达时，才允许新增类似：
-
-```text
-yieldContactStress
-ultimateContactStress
-```
-
-但必须：
-
-- 物理意义清楚；
-- 不与 weapon/armor 语义绑定；
-- 有明确单位或明确声明是 proxy；
-- 不破坏旧 Blueprint。
-
----
-
-# 8. 向后兼容
-
-旧 Blueprint 没有新 contact-local 参数时：
-
-- 不应突然全部变得极脆；
-- Phase 14 现有结果应基本保持；
-- 可以默认 concentration factor = neutral；
-- 或只有明确声明新 Material 参数时启用新局部响应。
-
-不要偷偷重标所有已有 Material。
-
----
-
-# 9. 必须完成的实验
-
-所有核心实验使用真实 Rapier + WorldRuntime。
-
----
-
-## Experiment A — Broad Face vs Narrow Contact
-
-构造两个 source Part。
-
-保持：
-
-- mass；
-- material；
-- velocity / applied impulse；
-- target；
-- total collision setup；
-
-尽可能相同。
-
-只改变 source 的接触 geometry，使一个产生：
-
-- 较宽接触；
-- 较集中接触。
-
-要求：
-
-- 两者 target 收到的总 contact load 处于可比较范围；
-- 集中接触的 concentration 明显更高；
-- 在同一个 target Material 下，集中接触产生更高局部 Damage；
-- 不能通过 source id / shape kind 分支直接赋 multiplier。
-
-如果 broad/narrow 的总 force 差异过大，报告必须同时展示总载荷和 concentration，不能把 force 差异冒充几何效果。
-
----
-
-## Experiment B — Same Force, Different Patch
-
-这是最重要的 controlled comparison。
-
-尽量构造 actuator-driven press：
-
-- 同一个 actuator；
-- 同样 maxOutput；
-- 同样 Energy；
-- 同样 target；
-- 两种 press head geometry。
-
-让两种情况达到近似相同的总 contact force。
-
-要求：
-
-```text
-similar total force
-different contact concentration
-→ different target material response
-```
-
-如果无法做到完全相同，允许合理容差，但必须量化。
-
----
-
-## Experiment C — Scale Matters
-
-使用相同形状比例、相同材料。
-
-比较：
-
-- 大接触头；
-- 缩小后的接触头。
-
-要求：
-
-- estimator 对物理尺度敏感；
-- 不能只依赖 contact point count；
-- 小尺度接触在相似总力下应产生更高集中程度。
-
----
-
-## Experiment D — Passive vs Actuated Source
-
-对同一个 target：
-
-1. passive moving object；
-2. actuator-driven press。
-
-使用能产生相似 contact concentration + load 的配置。
-
-要求：
-
-- 两种来源走同一个 Material response；
-- Core 不知道来源类型；
-- 结果能通过物理量解释。
-
----
-
-## Experiment E — Broad Support Must Not Become a Knife
-
-构造普通支撑 / 平面承载场景。
-
-要求：
-
-- 大面积/低集中接触在正常载荷下保持稳定；
-- 新系统不会让普通地面、平台、支撑结构因为“有 contact force”就持续快速 fracture；
-- Phase 13 Sandbox 默认模板仍保持可用。
-
-这是防回归验收。
-
----
-
-# 10. 几何支持范围
-
-第一版至少保证现有基础 primitive：
-
-- box；
-- sphere；
-- capsule；
-
-能够进入 estimator。
-
-convex 如果 Rapier /现有 Geometry 数据不足：
-
-- 可以采用保守 generic fallback；
-- 但不能 fixture-specific。
-
-报告中写清楚 convex 的近似。
-
----
-
-# 11. 不做 penetration
-
-即使一个小接触头把 target fracture：
-
-Phase 15 也不要求它穿进目标。
-
-允许结果仍然是：
-
-```text
-contact
-→ local material fracture
-→ Part DamageState fractured
-```
-
-刚体 collider 仍保持原几何。
-
-不要为了视觉上“刺进去”：
-
-- disable collision；
-- teleport；
-- shrink collider；
-- spawn hole；
-- delete target。
-
-这些留到之后真正的 penetration / fragmentation 阶段讨论。
-
----
-
-# 12. Phase 14 load-flow 不得被破坏
-
-继续维持：
-
-### 外部接触
-
-```text
-contact → Part material
-```
-
-### 内部结构载荷
-
-```text
-connection reaction → Connection structural state
-```
-
-### Part fracture
-
-```text
-Part fracture → incident Connection separation
-```
-
-Phase 15 不允许重新把同一 contact 复制成：
-
-```text
-Part local damage
-+ Part force damage
-+ Connection endpoint damage
-```
-
-三次重复计算。
-
-必须在报告里画清楚 load flow。
-
----
-
-# 13. 关于内部 Part stress 的已知边界
-
-Phase 14 选择了：
-
-- external contact 主要损伤 Part；
-- internal Connection reaction 主要损伤 Connection。
-
-Phase 15 不要顺便重做内部梁弯曲 / Part 内应力。
-
-把它继续作为已知低精度边界记录：
-
-> 一个 Part 目前不会因为没有外部接触的纯内部连续应力场自动产生真实截面破坏；结构内部失效主要由 Connection 表达。
-
-未来如要解决，单独开 Phase，不要混入本阶段。
-
----
-
-# 14. Sandbox 可观测性
-
-只做轻量更新。
-
-选中 Part 时，如果低成本，显示：
-
-- contact force；
-- contact impulse；
-- contact point count；
-- concentration / effective patch proxy。
-
-不要新增攻击 UI。
-
-现有物理冲击工具继续只是测试工具。
-
----
-
-# 15. Anti-cheat
-
-扫描生产代码，禁止：
-
-- sharpness
-- tooth
-- fang
-- claw
-- blade
-- weapon
-- attack
-- pierce
-- cuttingPower
-- damageMultiplier
-- armor
-- fixture id / experiment id 参与 concentration 或 Damage。
-
-Shape kind 可以用于物理几何计算，但禁止：
-
-```text
-if sphere => damage *= 2
-if box => damage *= 0.5
-```
-
-任何 shape-specific 逻辑必须是在计算实际几何尺度，而不是赋予伤害语义。
-
----
-
-# 16. Regression
+## 1. 核心原则
 
 必须保持：
 
-- Phase 9 Structural Load；
-- Phase 10 Tension；
-- Phase 11 Energy；
-- Phase 12 Capability；
-- Phase 13 Sandbox；
-- Phase 14 direct contact Damage；
+```text
+Structure
+→ Actuator physical output
+→ Rapier
+→ Contact / structural load
+→ Damage / separation
+→ observable capability loss
+```
 
-继续通过。
+禁止变成：
 
-特别验证：
+```text
+attack button
+→ attackPower
+→ HP -= damage
+```
 
-- 默认地面接触；
-- Gripper；
-- Tension template；
-- Active body；
-
-不会因为 concentration estimator 出现意外 fracture。
+Arena 只能组织场景、输入、观察与重置，不能替实体制造能力或结果。
 
 ---
 
-# 17. 测试
+## 2. 第一版范围必须小
 
-至少新增：
+不要直接做狮子、老虎或完整动物。
 
-- PhysicsAdapter contact-manifold / concentration tests；
-- broad vs narrow；
-- same-force different patch；
-- scale comparison；
-- passive vs actuated source；
-- broad support compatibility；
-- Core Material response tests；
-- Phase 14 regression。
+先做两个低复杂度 Fighter fixture，目的只是验证对抗闭环。
 
-完成前运行：
+### Fighter A — Rammer
+
+一个低重心、结构稳定、可向前运动的实体，前部有真实几何撞击结构。
+
+“攻击”只能来自：
+
+```text
+actuation
+→ body acceleration
+→ physical collision
+→ existing Part Damage
+```
+
+不得存在 ramDamage / attackStrength。
+
+### Fighter B — Gripper
+
+一个低重心实体，带可主动闭合的夹持/颚式结构。
+
+“咬/夹”只能来自：
+
+```text
+ControlSignal
+→ joint/tension actuator
+→ jaws physically close
+→ real contact/friction/load
+→ existing Damage
+```
+
+不得存在 biteDamage / gripDamage。
+
+这两个 fixture 只是验证工具，不建立 Rammer/Gripper 专用 Core 类型。
+
+---
+
+## 3. Arena 场景
+
+新增一个独立 Arena 场景/模式，至少包含：
+
+- 平整地面；
+- 简单围墙或边界；
+- 两个独立 Entity 同时存在；
+- 清晰的出生位置；
+- 摄像机能同时观察双方；
+- Reset / Restart；
+- Pause；
+- 基本时间显示。
+
+Arena 不应侵入 Core Physics 规则。
+
+---
+
+## 4. 控制
+
+Arena v0.1：
+
+- Fighter A：玩家控制；
+- Fighter B：简单自动控制。
+
+玩家输入继续走：
+
+```text
+UI/Input
+→ ControlSignal
+→ Actuator
+```
+
+不得从 UI：
+
+- setTranslation；
+- setRotation；
+- 直接改 velocity；
+- 直接 applyImpulse 到 torso 作为移动能力；
+- 直接设置 DamageState。
+
+---
+
+## 5. 简单对手控制器
+
+不要解冻复杂 Brain/Skill。
+
+对手只需要：
+
+```text
+观察对方大致方向
+→ 转向/靠近
+→ 在合适条件下输出已有 actuator ControlSignal
+```
+
+可以非常笨。
+
+它的目标是让双方发生真实互动，不是证明 AI。
+
+禁止：
+
+```text
+enemyNear → applyDamage()
+enemyNear → executeBiteSuccess()
+```
+
+是否撞到、夹到、造成损伤，全部交给物理世界。
+
+---
+
+## 6. 明确禁止“假运动”
+
+参考项目研究已经发现，很多 active-ragdoll 项目为了好看会直接给 torso：
+
+- hover impulse；
+- upright torque；
+- forward drive impulse；
+- yaw torque；
+- teleport rescue。
+
+这些在普通游戏里可以接受，但 Arena v0.1 的正常移动链路中禁止使用它们。
+
+特别禁止为了“能走”添加：
+
+```text
+applyDrive()
+applyHover()
+applyUpright()
+bodyForwardImpulse
+hidden reaction wheel
+extra fixture-only actuator signal
+```
+
+允许：
+
+- Joint actuator；
+- Tension actuator；
+- 合法的 physical contact；
+- friction；
+- normal constraints；
+- 现有 Energy 限制。
+
+如果实体因此走得很差，就记录真实失败，不要用隐藏力掩盖。
+
+---
+
+## 7. 战斗/伤害禁止语义化
+
+生产 Core / Physics / Simulation 中禁止新增：
+
+- health / hp；
+- attackPower；
+- biteDamage；
+- ramDamage；
+- weaponDamage；
+- armor；
+- defense；
+- damageMultiplier；
+- isWeapon；
+- canAttack；
+- canBite；
+- canFight。
+
+现有 Damage 系统继续作为唯一结构损伤来源。
+
+Arena 可以显示：
+
+- Part integrity；
+- Connection state；
+- Energy；
+- structural component count；
+- 是否仍能产生明显运动；
+
+但不能增加一条独立“生命值”。
+
+---
+
+## 8. ArenaObserver
+
+增加一个只读的 `ArenaObserver` 或等价模块。
+
+职责只包括：
+
+- 观察双方结构状态；
+- 观察 Energy；
+- 观察位置；
+- 观察是否还有可用 actuator / 可测运动；
+- 判断本局是否需要结束；
+- 输出结束原因。
+
+第一版结束条件可以很简单，例如：
+
+- 主体完全失去主要结构连接；
+- 长时间无法产生有效运动；
+- 越界；
+- 手动结束；
+- 超时。
+
+不要定义“HP <= 0”。
+
+Observer 不能修改物理结果。
+
+---
+
+## 9. 暂时不要顺手解决这些问题
+
+除非 Arena 被它们直接阻塞，否则本阶段不要展开：
+
+- Contact Concentration / Phase 15；
+- Material V2；
+- joint reaction WASM fork；
+- 完整 Energy topology；
+- soft body；
+- Spring/Damper 大系统；
+- 完整 animal body；
+- 复杂 Brain；
+- evolution；
+- penetration / cutting；
+- mesh fracture；
+- UI 大重做；
+- ECS 重构。
+
+原则：
+
+> 先让 Arena 暴露哪个问题真正阻塞，再只修那个问题。
+
+---
+
+## 10. 允许的最小阻塞修复
+
+如果两个简单 Fighter 无法完成 Arena 闭环，允许只做最小必要修复。
+
+例如：
+
+### A. 身体完全无法稳定移动
+
+先检查：
+
+- geometry；
+- COM；
+- friction；
+- actuator strength；
+- joint axis / limits；
+- control phase。
+
+只有明确证明这些仍不足时，才讨论最小 passive spring/damper。
+
+### B. 接触完全无法产生有意义的损伤差异
+
+先使用现有 Damage。
+
+如果确认“接触面积/集中程度”已经成为 Arena 的真实阻塞，再恢复旧 Phase 15。
+
+### C. 多关节 Connection Damage 明显错误
+
+记录 estimator 失真案例，再单独处理。
+
+不要提前重写全部 estimator。
+
+---
+
+## 11. 参考项目的使用边界
+
+可参考：
+
+### nickmeinhold/virtual-creatures
+
+参考：
+
+- graph-based morphology；
+- attachment；
+- multi-DOF joints；
+- genotype/blueprint → physical body。
+
+不要照搬其 evolution/brain。
+
+### chrxh/alien
+
+参考：
+
+- “世界先可玩”的产品形态；
+- 实时 inspection；
+- 编辑/观察体验；
+- 局部结构与资源的长期方向。
+
+禁止照搬其 Attacker/Defender 属性战斗系统。
+
+### Feelsrat/creature-playground
+
+参考：
+
+- Three.js + Rapier creature construction；
+- collision groups；
+- joints；
+- ragdoll/debug tooling。
+
+禁止照搬：
+
+- hover；
+- upright assist；
+- torso drive；
+- hidden yaw torque；
+- teleport-based normal locomotion。
+
+### EvoGym
+
+参考 Body 与 Arena/Task 解耦。
+
+---
+
+## 12. 最低可玩验收
+
+Arena v0.1 必须实际做到：
+
+1. 页面/模式中能进入 Arena；
+2. 同一个 World 中同时存在两个真实 Entity；
+3. 玩家能通过 ControlSignal 控制 Fighter A；
+4. Fighter B 能通过简单控制器靠近玩家；
+5. 两个实体能真实碰撞；
+6. 至少一种对抗动作能通过现有物理链产生可观察 Damage；
+7. Damage 后结构/运动表现出现自然下降；
+8. ArenaObserver 能报告一局结束及原因；
+9. Reset 后世界状态干净；
+10. 不依赖 HP、attackPower、隐藏 torso 推进/扶正力。
+
+不要求：
+
+- 好看；
+- 像真正动物；
+- 平衡；
+- 战斗有趣；
+- AI 聪明；
+- 每局都能分出胜负。
+
+第一版的成功标准只有：
+
+> “Morphodyne 的现有规则已经能支撑一个真实的双实体物理对抗闭环。”
+
+---
+
+## 13. Anti-cheat 审查
+
+完成后专门扫描：
+
+- torso direct impulse/torque locomotion；
+- fixture id 特判；
+- Fighter A/B 特判；
+- semantic attack/damage；
+- UI direct physics mutation；
+- hidden reaction wheel；
+- 测试专用额外 actuator 注入；
+- 直接设置成功/失败状态。
+
+任何上述路径进入生产 Arena，则本阶段不通过。
+
+---
+
+## 14. 测试
+
+至少增加：
+
+- 双 Entity 同 World coexistence；
+- Arena reset；
+- player ControlSignal path；
+- opponent ControlSignal path；
+- real contact between fighters；
+- contact → existing Damage；
+- damage → observable structural/functional degradation；
+- ArenaObserver read-only behavior；
+- anti-cheat regression。
+
+继续运行：
 
 ```bash
 npm test
@@ -581,65 +417,57 @@ npm run check:boundaries
 
 ---
 
-# 18. 报告
+## 15. 报告
 
 创建：
 
 ```text
-PHASE15_REPORT.md
+ARENA_V01_REPORT.md
 ```
 
-必须记录：
+只回答：
 
-1. Rapier contact API 调研；
-2. 为什么不能/能获得真实面积；
-3. estimator 定义、单位与边界；
-4. geometry 如何进入 estimator；
-5. 是否使用 smoothing / minimum patch；
-6. 五个实验的定量结果；
-7. total force 与 concentration 分开展示；
-8. backward compatibility；
-9. Phase 14 load flow 是否保持；
-10. anti-cheat audit。
+1. 两个 Fighter 的实际结构；
+2. 它们如何移动；
+3. 它们如何发生对抗；
+4. Damage 的真实因果链；
+5. 是否发现隐藏辅助力；
+6. Arena 暴露出的前三个真实底层瓶颈；
+7. 下一步只推荐解决哪一个。
+
+不要把报告写成长期路线图。
 
 ---
 
-# 19. 工作方式
+## 16. 工作方式
 
-这是一个完整 Phase。
-
-不要要求用户中途传话。
+这是一个完整任务，不要要求用户中途传话。
 
 主代理负责：
 
-- Rapier API investigation；
-- estimator design；
-- architecture decision；
-- implementation；
-- integration experiments；
+- 设计；
+- 实现；
+- 测试；
 - anti-cheat review；
-- regression。
+- 报告。
 
-可以使用 `gpt6-luna` 子代理做 API 调研或独立实验，但主代理负责最终方案。
+可以使用 `gpt6-luna` 子代理做独立代码审查或参考项目核对。
 
-不要建立专门 verifier 子代理。
-
-不要开始 Phase 16。
+不要建立 verifier 子代理。
 
 完成后：
 
-1. 更新 `docs/ARCHITECTURE_v0.3.md`；
-2. 创建 `PHASE15_REPORT.md`；
-3. 完整测试；
+1. 更新必要文档；
+2. 创建 `ARENA_V01_REPORT.md`；
+3. 跑完整测试；
 4. commit；
 5. push；
-6. 创建 PR 到 `main`；
-7. 停止等待评审。
+6. 停止，等待独立评审。
 
 ---
 
-# Phase 15 核心验收
+# Arena v0.1 最终验收
 
-**在总接触力相近时，仅因为真实接触几何造成的接触集中程度不同，同一个 Material 就必须产生不同的局部损伤结果。**
+**两个没有 HP、attackPower 或隐藏推进/扶正力的 Morphodyne Entity，能够在同一个 3D Arena 中依靠自身结构、Actuator 和真实物理接触发生对抗，并产生真实可观察的结构损伤与功能下降。**
 
-如果最终效果依赖 `sharpness`、`weapon`、`tooth`、shape damage multiplier 或 fixture 特判，则 Phase 15 不通过。
+如果为了“能玩”而直接制造移动、攻击成功、伤害或胜负结果，则 Arena v0.1 不通过。
