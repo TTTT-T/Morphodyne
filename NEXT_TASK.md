@@ -1,473 +1,229 @@
-# NEXT TASK — Arena v0.1：先把 Morphodyne 变成可玩的斗兽场
+# NEXT TASK — Arena v0.1.1：视觉模型完善
 
-当前 Phase 15（Contact Concentration）暂停，不删除其方向；只有当 Arena 实际暴露“尖/钝接触无法区分”为阻塞问题时再回来做。
+Arena v0.1 的物理对抗闭环已经成立。下一步先不要继续底层 Phase，也不要修复杂 AI。
 
-本阶段目标不是继续扩底层理论，而是用现有 Morphodyne 规则做出第一个真正可玩的闭环：
+本任务只解决一个问题：
 
-> 两个由通用 Part / Connection / Actuator / Energy / Damage 规则构成的实体，在同一个 3D 场地中移动、接触、对抗，并因为真实物理过程出现结构损伤或失能。
-
-Arena v0.1 本身就是下一轮架构压力测试。
+> 当前 Fighter 只是方块、球和裸露关节，视觉上过于粗糙。把 Rammer 和 Gripper 做成两个完整、统一、有辨识度的机械兽模型，同时保持现有物理结构、质量、Collider、Actuator、Damage 因果链不变。
 
 ---
 
-## 1. 核心原则
+## 1. 最重要的边界
 
-必须保持：
+这是 **Rendering / Presentation Pass**，不是 Physics 重构。
 
-```text
-Structure
-→ Actuator physical output
-→ Rapier
-→ Contact / structural load
-→ Damage / separation
-→ observable capability loss
-```
+默认禁止修改：
 
-禁止变成：
+- Part mass；
+- Part collider geometry；
+- Connection 类型、anchor、axis、limits；
+- Actuator maxOutput；
+- Energy；
+- Material Damage 参数；
+- ArenaOpponent 行为逻辑；
+- Damage / fracture 规则。
 
-```text
-attack button
-→ attackPower
-→ HP -= damage
-```
+除非发现纯粹的渲染 bug，否则不要借“美化模型”顺手调物理。
 
-Arena 只能组织场景、输入、观察与重置，不能替实体制造能力或结果。
+验收时 Arena v0.1 原有物理测试必须继续通过。
 
 ---
 
-## 2. 第一版范围必须小
+## 2. 视觉目标
 
-不要直接做狮子、老虎或完整动物。
+两个 Fighter 必须一眼能区分，并且看起来像“完整机械体”，而不是调试积木。
 
-先做两个低复杂度 Fighter fixture，目的只是验证对抗闭环。
+### Rammer
 
-### Fighter A — Rammer
+视觉语言：
 
-一个低重心、结构稳定、可向前运动的实体，前部有真实几何撞击结构。
+- 低矮、厚重、前冲；
+- 明确的车体/躯干外壳；
+- 前部撞角/撞槌结构要和现有真实 rammer-nose 位置一致；
+- 轮子有轮毂、胎面/层次；
+- chassis 与 nose 之间有可读的机械连接；
+- 可以增加非物理的装甲壳、支架、灯/传感器等装饰；
+- 色彩统一，强调“重型冲撞单位”。
 
-“攻击”只能来自：
+不要把视觉撞角画得远大于真实 collider，避免玩家误判碰撞范围。
 
-```text
-actuation
-→ body acceleration
-→ physical collision
-→ existing Part Damage
-```
+### Gripper
 
-不得存在 ramDamage / attackStrength。
+视觉语言：
 
-### Fighter B — Gripper
+- 更灵活、更像捕捉/夹持机械兽；
+- chassis 有完整外壳；
+- 两侧 jaw 必须清晰可见并与真实 prismatic jaw 位置一致；
+- jaw 的开合方向一眼能理解；
+- 可以增加钳口壳体、滑轨护罩、非碰撞机械细节；
+- 轮子同样补完整视觉结构；
+- 色彩与 Rammer 明显区分。
 
-一个低重心实体，带可主动闭合的夹持/颚式结构。
-
-“咬/夹”只能来自：
-
-```text
-ControlSignal
-→ joint/tension actuator
-→ jaws physically close
-→ real contact/friction/load
-→ existing Damage
-```
-
-不得存在 biteDamage / gripDamage。
-
-这两个 fixture 只是验证工具，不建立 Rammer/Gripper 专用 Core 类型。
+不要添加视觉“牙齿”并让玩家误以为它们具有真实碰撞，如果只是装饰，必须尺寸克制并位于真实 jaw collider 范围内。
 
 ---
 
-## 3. Arena 场景
+## 3. 实现方式
 
-新增一个独立 Arena 场景/模式，至少包含：
+优先扩展 ThreeSmokeRenderer，使：
 
-- 平整地面；
-- 简单围墙或边界；
-- 两个独立 Entity 同时存在；
-- 清晰的出生位置；
-- 摄像机能同时观察双方；
-- Reset / Restart；
-- Pause；
-- 基本时间显示。
+> 一个 Physics Part handle 可以对应一个“视觉组合体”，而不是只能对应单个 primitive mesh。
 
-Arena 不应侵入 Core Physics 规则。
+推荐建立 rendering-only 的 visual descriptor，例如：
+
+```ts
+PartVisual
+VisualPiece
+VisualAssembly
+```
+
+每个 VisualPiece 可以包含：
+
+- box / sphere / cylinder / capsule / cone；
+- local position；
+- local rotation；
+- local scale；
+- material/color；
+- optional emissive。
+
+这些数据只属于 Rendering / Arena presentation。
+
+不要把这些外观字段塞进 Core Material、Damage 或 Physics Blueprint。
 
 ---
 
-## 4. 控制
+## 4. 视觉组合必须跟随真实 Part
 
-Arena v0.1：
+如果一个 Part：
 
-- Fighter A：玩家控制；
-- Fighter B：简单自动控制。
+- 移动；
+- 旋转；
+- fracture 后脱离；
+- Connection 分离；
 
-玩家输入继续走：
+它对应的整套视觉组合必须一起跟随该 Part 的真实 Pose。
 
-```text
-UI/Input
-→ ControlSignal
-→ Actuator
-```
+不得出现：
 
-不得从 UI：
+- 外壳留在原地；
+- jaw collider 已断但视觉仍连在 chassis；
+- detached Part 的装饰继续跟随旧父体。
 
-- setTranslation；
-- setRotation；
-- 直接改 velocity；
-- 直接 applyImpulse 到 torso 作为移动能力；
-- 直接设置 DamageState。
+一个视觉 assembly 的根 Pose 必须来自该 Part 的真实 Rapier Pose。
 
 ---
 
-## 5. 简单对手控制器
-
-不要解冻复杂 Brain/Skill。
-
-对手只需要：
-
-```text
-观察对方大致方向
-→ 转向/靠近
-→ 在合适条件下输出已有 actuator ControlSignal
-```
-
-可以非常笨。
-
-它的目标是让双方发生真实互动，不是证明 AI。
-
-禁止：
-
-```text
-enemyNear → applyDamage()
-enemyNear → executeBiteSuccess()
-```
-
-是否撞到、夹到、造成损伤，全部交给物理世界。
-
----
-
-## 6. 明确禁止“假运动”
-
-参考项目研究已经发现，很多 active-ragdoll 项目为了好看会直接给 torso：
-
-- hover impulse；
-- upright torque；
-- forward drive impulse；
-- yaw torque；
-- teleport rescue。
-
-这些在普通游戏里可以接受，但 Arena v0.1 的正常移动链路中禁止使用它们。
-
-特别禁止为了“能走”添加：
-
-```text
-applyDrive()
-applyHover()
-applyUpright()
-bodyForwardImpulse
-hidden reaction wheel
-extra fixture-only actuator signal
-```
+## 5. 可以增加的纯视觉元素
 
 允许：
 
-- Joint actuator；
-- Tension actuator；
-- 合法的 physical contact；
-- friction；
-- normal constraints；
-- 现有 Energy 限制。
+- 机械外壳；
+- 倒角/分层结构；
+- 轮毂；
+- 轴帽；
+- 装甲板；
+- 管线；
+- 小型灯光/发光件；
+- 传感器/“眼睛”；
+- 非碰撞支架；
+- 颜色与材质层次；
+- 地面网格、Arena 标记；
+- 更好的环境光与阴影；
+- 简单受损颜色反馈。
 
-如果实体因此走得很差，就记录真实失败，不要用隐藏力掩盖。
-
----
-
-## 7. 战斗/伤害禁止语义化
-
-生产 Core / Physics / Simulation 中禁止新增：
-
-- health / hp；
-- attackPower；
-- biteDamage；
-- ramDamage；
-- weaponDamage；
-- armor；
-- defense；
-- damageMultiplier；
-- isWeapon；
-- canAttack；
-- canBite；
-- canFight。
-
-现有 Damage 系统继续作为唯一结构损伤来源。
-
-Arena 可以显示：
-
-- Part integrity；
-- Connection state；
-- Energy；
-- structural component count；
-- 是否仍能产生明显运动；
-
-但不能增加一条独立“生命值”。
+这些都不能影响 Physics。
 
 ---
 
-## 8. ArenaObserver
+## 6. Damage 可视化
 
-增加一个只读的 `ArenaObserver` 或等价模块。
+当前 Damage 已经是真实状态，所以可以把它更直观地表现出来。
 
-职责只包括：
+建议：
 
-- 观察双方结构状态；
-- 观察 Energy；
-- 观察位置；
-- 观察是否还有可用 actuator / 可测运动；
-- 判断本局是否需要结束；
-- 输出结束原因。
+- intact：正常材质；
+- yielded / damaged：轻微发热/橙色或表面高亮；
+- fractured：明显变暗/红色警示；
+- separated：视觉上随真实 Part 分离。
 
-第一版结束条件可以很简单，例如：
+禁止伪造：
 
-- 主体完全失去主要结构连接；
-- 长时间无法产生有效运动；
-- 越界；
-- 手动结束；
-- 超时。
-
-不要定义“HP <= 0”。
-
-Observer 不能修改物理结果。
+- 血条；
+- HP 数字；
+- 不存在的裂纹 Collider；
+- 视觉爆炸触发额外 Damage。
 
 ---
 
-## 9. 暂时不要顺手解决这些问题
+## 7. Arena 本身也顺手做最小视觉整理
 
-除非 Arena 被它们直接阻塞，否则本阶段不要展开：
+可以做：
 
-- Contact Concentration / Phase 15；
-- Material V2；
-- joint reaction WASM fork；
-- 完整 Energy topology；
+- 地面边界更清晰；
+- 两侧出生区标记；
+- Arena 中央线；
+- 更合适的固定摄像机；
+- 灯光、阴影、背景；
+- Fighter 名称/颜色标识。
+
+不要做大型 UI 重构。
+
+---
+
+## 8. 不做
+
+本任务不要做：
+
+- GLTF 资产管线大改；
+- 外部商业模型；
+- 动物皮肤/毛发；
+- 骨骼动画；
 - soft body；
-- Spring/Damper 大系统；
-- 完整 animal body；
-- 复杂 Brain；
-- evolution；
-- penetration / cutting；
-- mesh fracture；
-- UI 大重做；
-- ECS 重构。
+- 真实轮胎形变；
+- 粒子特效大系统；
+- Camera shake；
+- post-processing 大改；
+- Phase 15；
+- Spring/Damper；
+- Brain/evolution；
+- 物理平衡调整。
 
-原则：
-
-> 先让 Arena 暴露哪个问题真正阻塞，再只修那个问题。
+先把现有两个 Fighter 从“调试积木”提升到“像一个完整东西”。
 
 ---
 
-## 10. 允许的最小阻塞修复
+## 9. 验收标准
 
-如果两个简单 Fighter 无法完成 Arena 闭环，允许只做最小必要修复。
+必须满足：
 
-例如：
-
-### A. 身体完全无法稳定移动
-
-先检查：
-
-- geometry；
-- COM；
-- friction；
-- actuator strength；
-- joint axis / limits；
-- control phase。
-
-只有明确证明这些仍不足时，才讨论最小 passive spring/damper。
-
-### B. 接触完全无法产生有意义的损伤差异
-
-先使用现有 Damage。
-
-如果确认“接触面积/集中程度”已经成为 Arena 的真实阻塞，再恢复旧 Phase 15。
-
-### C. 多关节 Connection Damage 明显错误
-
-记录 estimator 失真案例，再单独处理。
-
-不要提前重写全部 estimator。
+1. Rammer 一眼能看出是低矮重型冲撞机械体；
+2. Gripper 一眼能看出是带双 jaw 的夹持机械体；
+3. 不看调试线也能理解主要结构；
+4. 轮子、jaw、nose 与真实 Physics Part 大致对齐；
+5. Damage / separation 在视觉上可读；
+6. detached Part 的全部视觉组件正确跟随真实 Part；
+7. 不修改 Arena v0.1 的核心 Physics 参数；
+8. 原 Arena 物理测试继续通过；
+9. `npm test`、`npm run typecheck`、`npm run build`、`npm run check:boundaries` 全通过；
+10. 浏览器实际试玩确认模型不再只是方块/球调试件。
 
 ---
 
-## 11. 参考项目的使用边界
+## 10. 工作方式
 
-可参考：
+直接在当前 `codex/arena-v0.1` 基础上完成。
 
-### nickmeinhold/virtual-creatures
-
-参考：
-
-- graph-based morphology；
-- attachment；
-- multi-DOF joints；
-- genotype/blueprint → physical body。
-
-不要照搬其 evolution/brain。
-
-### chrxh/alien
-
-参考：
-
-- “世界先可玩”的产品形态；
-- 实时 inspection；
-- 编辑/观察体验；
-- 局部结构与资源的长期方向。
-
-禁止照搬其 Attacker/Defender 属性战斗系统。
-
-### Feelsrat/creature-playground
-
-参考：
-
-- Three.js + Rapier creature construction；
-- collision groups；
-- joints；
-- ragdoll/debug tooling。
-
-禁止照搬：
-
-- hover；
-- upright assist；
-- torso drive；
-- hidden yaw torque；
-- teleport-based normal locomotion。
-
-### EvoGym
-
-参考 Body 与 Arena/Task 解耦。
-
----
-
-## 12. 最低可玩验收
-
-Arena v0.1 必须实际做到：
-
-1. 页面/模式中能进入 Arena；
-2. 同一个 World 中同时存在两个真实 Entity；
-3. 玩家能通过 ControlSignal 控制 Fighter A；
-4. Fighter B 能通过简单控制器靠近玩家；
-5. 两个实体能真实碰撞；
-6. 至少一种对抗动作能通过现有物理链产生可观察 Damage；
-7. Damage 后结构/运动表现出现自然下降；
-8. ArenaObserver 能报告一局结束及原因；
-9. Reset 后世界状态干净；
-10. 不依赖 HP、attackPower、隐藏 torso 推进/扶正力。
-
-不要求：
-
-- 好看；
-- 像真正动物；
-- 平衡；
-- 战斗有趣；
-- AI 聪明；
-- 每局都能分出胜负。
-
-第一版的成功标准只有：
-
-> “Morphodyne 的现有规则已经能支撑一个真实的双实体物理对抗闭环。”
-
----
-
-## 13. Anti-cheat 审查
-
-完成后专门扫描：
-
-- torso direct impulse/torque locomotion；
-- fixture id 特判；
-- Fighter A/B 特判；
-- semantic attack/damage；
-- UI direct physics mutation；
-- hidden reaction wheel；
-- 测试专用额外 actuator 注入；
-- 直接设置成功/失败状态。
-
-任何上述路径进入生产 Arena，则本阶段不通过。
-
----
-
-## 14. 测试
-
-至少增加：
-
-- 双 Entity 同 World coexistence；
-- Arena reset；
-- player ControlSignal path；
-- opponent ControlSignal path；
-- real contact between fighters；
-- contact → existing Damage；
-- damage → observable structural/functional degradation；
-- ArenaObserver read-only behavior；
-- anti-cheat regression。
-
-继续运行：
-
-```bash
-npm test
-npm run typecheck
-npm run build
-npm run check:boundaries
-```
-
----
-
-## 15. 报告
-
-创建：
-
-```text
-ARENA_V01_REPORT.md
-```
-
-只回答：
-
-1. 两个 Fighter 的实际结构；
-2. 它们如何移动；
-3. 它们如何发生对抗；
-4. Damage 的真实因果链；
-5. 是否发现隐藏辅助力；
-6. Arena 暴露出的前三个真实底层瓶颈；
-7. 下一步只推荐解决哪一个。
-
-不要把报告写成长期路线图。
-
----
-
-## 16. 工作方式
-
-这是一个完整任务，不要要求用户中途传话。
-
-主代理负责：
-
-- 设计；
-- 实现；
-- 测试；
-- anti-cheat review；
-- 报告。
-
-可以使用 `gpt6-luna` 子代理做独立代码审查或参考项目核对。
-
-不要建立 verifier 子代理。
+主代理负责设计和实现，不要让用户中途传话。
 
 完成后：
 
-1. 更新必要文档；
-2. 创建 `ARENA_V01_REPORT.md`；
-3. 跑完整测试；
+1. 创建 `ARENA_VISUAL_V011_REPORT.md`，只记录视觉结构、rendering 架构和物理零改动证明；
+2. 跑完整测试；
+3. browser smoke；
 4. commit；
 5. push；
-6. 停止，等待独立评审。
+6. 停止等待审查。
 
----
+# 最终验收
 
-# Arena v0.1 最终验收
-
-**两个没有 HP、attackPower 或隐藏推进/扶正力的 Morphodyne Entity，能够在同一个 3D Arena 中依靠自身结构、Actuator 和真实物理接触发生对抗，并产生真实可观察的结构损伤与功能下降。**
-
-如果为了“能玩”而直接制造移动、攻击成功、伤害或胜负结果，则 Arena v0.1 不通过。
+**Rammer 和 Gripper 必须从“物理调试积木”提升为有完整轮廓、机械层次和明确功能辨识度的两个机械兽，同时所有运动、碰撞、损伤和失能仍完全由 Arena v0.1 原有真实物理结构决定。**
