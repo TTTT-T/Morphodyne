@@ -51,7 +51,14 @@ export class ActuatorRuntime {
       const output = response === undefined ? target : previous + (target - previous) * seconds / (response + seconds);
       this.lastOutput.set(actuator.id, output);
       if (actuator.kind !== 'tension') {
-        return { actuator, output, speed: this.physics.readJointVelocity(this.body, actuator.connectionId) };
+        const speed = actuator.axis === undefined
+          ? this.physics.readJointVelocity(this.body, actuator.connectionId)
+          : this.physics.readJointVelocity(this.body, actuator.connectionId, actuator.axis);
+        return {
+          actuator,
+          output,
+          speed,
+        };
       }
       return this.tensionOutput(actuator, output);
     });
@@ -63,7 +70,11 @@ export class ActuatorRuntime {
     for (const entry of outputs) {
       const { actuator, output } = entry;
       if (actuator.kind !== 'tension') {
-        this.physics.applyJointOutput(this.body, actuator.connectionId, output * powerScale);
+        if (actuator.axis === undefined) {
+          this.physics.applyJointOutput(this.body, actuator.connectionId, output * powerScale);
+        } else {
+          this.physics.applyJointOutput(this.body, actuator.connectionId, output * powerScale, actuator.axis);
+        }
         continue;
       }
       if (!entry.direction || !entry.fromPoint || !entry.toPoint || output <= 0 || powerScale === 0) continue;

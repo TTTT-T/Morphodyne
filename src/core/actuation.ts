@@ -28,6 +28,8 @@ export interface JointActuator extends Actuator {
   /** Omitted for compatibility with existing Joint Actuator Blueprints. */
   readonly kind?: 'joint';
   readonly connectionId: string;
+  /** Optional axis in the connected joint's from-Part local frame. Required for spherical joints. */
+  readonly axis?: Vector3;
 }
 
 /** Equal and opposite tensile forces between two Part-local points. */

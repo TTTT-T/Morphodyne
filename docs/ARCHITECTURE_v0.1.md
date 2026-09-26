@@ -262,6 +262,18 @@ Signal
 
 Function arises from complete dependency networks rather than part labels.
 
+An articulated Connection may expose one rotational axis (revolute) or three
+rotational degrees of freedom about a shared anchor (spherical). The Blueprint
+declares these freedoms without naming an animal part or a physics backend.
+Optional passive angular supports declare a local axis, rest angle relative to
+the Blueprint pose, stiffness, damping, and an optional torque cap. The physics
+adapter applies each support as equal and opposite torques to the connected
+Parts, while actuator output remains a separate energy-limited path. This gives
+the same mechanism to passive structures, machines, and Agents; contact and
+joint constraints still determine motion and load. A spherical joint has no
+hard angular limits in the current contract; a passive support is a soft
+restoring response, not a range constraint.
+
 ### 4.5 Actuator
 
 **An actuator has output, not actions.**

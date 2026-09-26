@@ -108,10 +108,24 @@ export interface ConnectionBase {
   readonly toAnchor: Vector3;
 }
 
+/**
+ * A backend-neutral passive angular support element. The axis is expressed in
+ * the from-Part's local frame and the rest angle is measured relative to the
+ * Blueprint's initial relative orientation.
+ */
+export interface PassiveAngular {
+  readonly axis: Vector3;
+  readonly restAngle: number;
+  readonly stiffnessNmPerRad: number;
+  readonly dampingNmsPerRad: number;
+  readonly maxTorqueNm?: number;
+}
+
 export interface RigidConnection extends ConnectionBase {
   readonly kind: 'rigid';
   readonly axis?: never;
   readonly limits?: never;
+  readonly passiveAngular?: never;
 }
 
 export interface JointLimits {
@@ -124,6 +138,15 @@ export interface RevoluteConnection extends ConnectionBase {
   /** Axis expressed in the local frame of each connected part. */
   readonly axis: Vector3;
   readonly limits?: JointLimits;
+  readonly passiveAngular?: readonly PassiveAngular[];
+}
+
+export interface SphericalConnection extends ConnectionBase {
+  readonly kind: 'spherical';
+  /** Three relative rotational degrees of freedom around coincident anchors. */
+  readonly axis?: never;
+  readonly limits?: never;
+  readonly passiveAngular?: readonly PassiveAngular[];
 }
 
 export interface PrismaticConnection extends ConnectionBase {
@@ -131,9 +154,10 @@ export interface PrismaticConnection extends ConnectionBase {
   /** Axis expressed in the local frame of each connected part. */
   readonly axis: Vector3;
   readonly limits?: JointLimits;
+  readonly passiveAngular?: never;
 }
 
-export type Connection = RigidConnection | RevoluteConnection | PrismaticConnection;
+export type Connection = RigidConnection | RevoluteConnection | SphericalConnection | PrismaticConnection;
 
 export interface Blueprint {
   readonly id: string;
@@ -336,34 +360,90 @@ export function validateBlueprint(blueprint: Blueprint): string[] {
     }
 
     // Keep the public type a discriminated union, while still reporting malformed runtime data cast from external input.
-    const runtimeOptions = connection as unknown as { readonly kind: string; readonly axis?: Vector3; readonly limits?: JointLimits };
+    const runtimeOptions = connection as unknown as {
+      readonly kind: string;
+      readonly axis?: Vector3;
+      readonly limits?: JointLimits;
+      readonly passiveAngular?: readonly PassiveAngular[];
+    };
     if (runtimeOptions.kind === 'rigid') {
-      if (runtimeOptions.axis !== undefined || runtimeOptions.limits !== undefined) errors.push(`Invalid rigid connection options: ${connection.id}`);
+      if (runtimeOptions.axis !== undefined || runtimeOptions.limits !== undefined || runtimeOptions.passiveAngular !== undefined) {
+        errors.push(`Invalid rigid connection options: ${connection.id}`);
+      }
       continue;
     }
 
-    if (runtimeOptions.kind !== 'revolute' && runtimeOptions.kind !== 'prismatic') {
+    if (runtimeOptions.kind !== 'revolute' && runtimeOptions.kind !== 'spherical' && runtimeOptions.kind !== 'prismatic') {
       errors.push(`Invalid connection kind: ${connection.id}`);
       continue;
     }
 
+    if (runtimeOptions.kind !== 'revolute' && runtimeOptions.kind !== 'spherical' && runtimeOptions.passiveAngular !== undefined) {
+      errors.push(`Invalid passiveAngular: ${connection.id}`);
+    }
+
+    if (runtimeOptions.passiveAngular !== undefined) {
+      if (!Array.isArray(runtimeOptions.passiveAngular)) {
+        errors.push(`Invalid passiveAngular: ${connection.id}`);
+      } else {
+        for (const support of runtimeOptions.passiveAngular) {
+          if (!support || typeof support !== 'object') {
+            errors.push(`Invalid passiveAngular entry: ${connection.id}`);
+            continue;
+          }
+          const supportAxis = support.axis;
+          if (!supportAxis || !isFiniteVector(supportAxis)
+            || supportAxis.x ** 2 + supportAxis.y ** 2 + supportAxis.z ** 2 <= VECTOR_EPSILON_SQUARED) {
+            errors.push(`Invalid passiveAngular axis: ${connection.id}`);
+          } else if (runtimeOptions.kind === 'revolute' && runtimeOptions.axis && isFiniteVector(runtimeOptions.axis)
+            && runtimeOptions.axis.x ** 2 + runtimeOptions.axis.y ** 2 + runtimeOptions.axis.z ** 2 > VECTOR_EPSILON_SQUARED) {
+            const supportLength = Math.hypot(supportAxis.x, supportAxis.y, supportAxis.z);
+            const declaredLength = Math.hypot(runtimeOptions.axis.x, runtimeOptions.axis.y, runtimeOptions.axis.z);
+            const cross = {
+              x: supportAxis.y * runtimeOptions.axis.z - supportAxis.z * runtimeOptions.axis.y,
+              y: supportAxis.z * runtimeOptions.axis.x - supportAxis.x * runtimeOptions.axis.z,
+              z: supportAxis.x * runtimeOptions.axis.y - supportAxis.y * runtimeOptions.axis.x,
+            };
+            if ((cross.x ** 2 + cross.y ** 2 + cross.z ** 2) / (supportLength * declaredLength) ** 2 > 1e-8) {
+              errors.push(`Invalid passiveAngular axis: ${connection.id}`);
+            }
+          }
+          if (!Number.isFinite(support.restAngle)) errors.push(`Invalid passiveAngular restAngle: ${connection.id}`);
+          if (!Number.isFinite(support.stiffnessNmPerRad) || support.stiffnessNmPerRad <= 0) {
+            errors.push(`Invalid passiveAngular stiffness: ${connection.id}`);
+          }
+          if (!Number.isFinite(support.dampingNmsPerRad) || support.dampingNmsPerRad < 0) {
+            errors.push(`Invalid passiveAngular damping: ${connection.id}`);
+          }
+          if (support.maxTorqueNm !== undefined
+            && (!Number.isFinite(support.maxTorqueNm) || support.maxTorqueNm <= 0)) {
+            errors.push(`Invalid passiveAngular maxTorqueNm: ${connection.id}`);
+          }
+        }
+      }
+    }
+
     const axis = runtimeOptions.axis;
-    if (!axis || !isFiniteVector(axis) || axis.x ** 2 + axis.y ** 2 + axis.z ** 2 <= VECTOR_EPSILON_SQUARED) {
-      errors.push(`Invalid connection axis: ${connection.id}`);
-    } else {
-      const from = parts.get(connection.fromPartId);
-      const to = parts.get(connection.toPartId);
-      if (from && to && isUnitQuaternion(from.pose.rotation) && isUnitQuaternion(to.pose.rotation)) {
-        const a = rotate(axis, from.pose.rotation);
-        const b = rotate(axis, to.pose.rotation);
-        const lengthSquared = axis.x ** 2 + axis.y ** 2 + axis.z ** 2;
-        if (squaredDistance(a, b) / lengthSquared > 1e-8) errors.push(`Misaligned connection axis: ${connection.id}`);
+    if (runtimeOptions.kind !== 'spherical') {
+      if (!axis || !isFiniteVector(axis) || axis.x ** 2 + axis.y ** 2 + axis.z ** 2 <= VECTOR_EPSILON_SQUARED) {
+        errors.push(`Invalid connection axis: ${connection.id}`);
+      } else {
+        const from = parts.get(connection.fromPartId);
+        const to = parts.get(connection.toPartId);
+        if (from && to && isUnitQuaternion(from.pose.rotation) && isUnitQuaternion(to.pose.rotation)) {
+          const a = rotate(axis, from.pose.rotation);
+          const b = rotate(axis, to.pose.rotation);
+          const lengthSquared = axis.x ** 2 + axis.y ** 2 + axis.z ** 2;
+          if (squaredDistance(a, b) / lengthSquared > 1e-8) errors.push(`Misaligned connection axis: ${connection.id}`);
+        }
       }
     }
     const limits = runtimeOptions.limits;
     if (limits !== undefined && (!Number.isFinite(limits.min) || !Number.isFinite(limits.max) || limits.min > limits.max)) {
       errors.push(`Invalid connection limits: ${connection.id}`);
     }
+    if (runtimeOptions.kind === 'spherical' && limits !== undefined) errors.push(`Invalid spherical connection options: ${connection.id}`);
+    if (runtimeOptions.kind === 'spherical' && axis !== undefined) errors.push(`Invalid spherical connection options: ${connection.id}`);
   }
 
   const actuatorIds = new Set<string>();
@@ -388,8 +468,21 @@ export function validateBlueprint(blueprint: Blueprint): string[] {
     } else if (actuator.kind === undefined || actuator.kind === 'joint') {
       const connection = connections.get(actuator.connectionId);
       if (!connection) errors.push(`Unknown actuator connection: ${actuator.id}`);
-      else if (connection.kind !== 'revolute' && connection.kind !== 'prismatic') {
-        errors.push(`Actuator requires a revolute or prismatic connection: ${actuator.id}`);
+      else if (connection.kind !== 'revolute' && connection.kind !== 'spherical' && connection.kind !== 'prismatic') {
+        errors.push(`Actuator requires a movable connection: ${actuator.id}`);
+      }
+      const actuatorAxis = (actuator as unknown as { readonly axis?: Vector3 }).axis;
+      if (actuatorAxis !== undefined
+        && (!actuatorAxis || !isFiniteVector(actuatorAxis)
+          || actuatorAxis.x ** 2 + actuatorAxis.y ** 2 + actuatorAxis.z ** 2 <= VECTOR_EPSILON_SQUARED)) {
+        errors.push(`Invalid actuator axis: ${actuator.id}`);
+      }
+      if (connection?.kind === 'spherical' && (!actuatorAxis || !isFiniteVector(actuatorAxis)
+        || actuatorAxis.x ** 2 + actuatorAxis.y ** 2 + actuatorAxis.z ** 2 <= VECTOR_EPSILON_SQUARED)) {
+        errors.push(`Spherical actuator requires a nonzero axis: ${actuator.id}`);
+      }
+      if (connection && connection.kind !== 'spherical' && actuatorAxis !== undefined) {
+        errors.push(`Actuator axis requires a spherical connection: ${actuator.id}`);
       }
     } else {
       errors.push(`Invalid actuator kind: ${actuator.id}`);

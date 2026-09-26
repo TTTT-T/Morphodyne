@@ -60,17 +60,19 @@ class LeopardMotorRuntime {
   update(brain: BrainSnapshot, seconds: number): readonly ControlSignal[] {
     const joints = new Map(brain.selfModel.joints.map((joint) => [joint.connectionId, joint.value]));
     const intent = brain.skillIntent;
-    const moving = intent.skill === 'approach' || intent.skill === 'interact';
+    const moving = intent.skill === 'approach' || intent.skill === 'interact' || intent.skill === 'turn';
     if (moving) this.phase = (this.phase + seconds * Math.PI * 2 * 1.2) % (Math.PI * 2);
     const turn = clamp(intent.turn ?? (intent.skill === 'turn' ? 0.45 : 0));
     const orientation = brain.selfModel.orientation?.value;
     const roll = orientation ? 2 * (orientation[3] * orientation[0] + orientation[1] * orientation[2]) : 0;
     const pitch = orientation ? 2 * (orientation[3] * orientation[2] - orientation[0] * orientation[1]) : 0;
     const signals: ControlSignal[] = [];
-    const command = (actuatorId: string, connectionId: string, target: number, gain = 3.5): void => {
+    const command = (actuatorId: string, connectionId: string, target: number,
+      gain = 3.5, coordinate = 0): void => {
       const state = joints.get(connectionId);
-      if (!state || !Number.isFinite(state[0]) || !Number.isFinite(state[1])) return;
-      signals.push(createControlSignal(actuatorId, clamp(gain * (target - state[0]) - 0.28 * state[1])));
+      if (!state || !Number.isFinite(state[coordinate]) || !Number.isFinite(state[coordinate + 1])) return;
+      signals.push(createControlSignal(actuatorId,
+        clamp(gain * (target - state[coordinate]) - 0.28 * state[coordinate + 1])));
     };
     for (const end of ['front', 'hind'] as const) {
       for (const side of ['left', 'right'] as const) {
@@ -78,11 +80,21 @@ class LeopardMotorRuntime {
         const sideSign = side === 'left' ? -1 : 1;
         const phase = this.phase + ((end === 'front') === (side === 'left') ? 0 : Math.PI);
         const stride = moving ? Math.sin(phase) : 0;
-        const turnScale = intent.skill === 'turn' ? 0.35 : 0.18;
-        const hipTarget = -0.25 * stride + sideSign * turn * turnScale
+        const reaching = intent.skill === 'interact' && end === 'front';
+        const strideScale = intent.skill === 'turn' ? sideSign * turn : 1 + sideSign * turn * 0.8;
+        const hipTarget = 0.38 * stride * strideScale
+          + (reaching ? 0.28 : 0)
           + (end === 'front' ? -pitch : pitch) * 0.15 + sideSign * roll * 0.18;
-        const kneeTarget = -0.08 - (moving ? 0.55 * Math.max(0, stride) : 0);
+        const kneeTarget = reaching ? 0.12 : -0.08 - (moving ? 0.55 * Math.max(0, stride) : 0);
+        // Spherical joints expose pitch, roll and yaw through the same physical
+        // connection. These are ordinary actuator targets based on sensed
+        // joint coordinates; ground contact determines whether they turn or reach.
+        const rollTarget = -sideSign * (reaching ? 0.3 : 0.1) - turn * 0.12;
+        const yawTarget = -turn * (end === 'front' ? 0.45 : -0.3)
+          + (moving ? 0.08 * stride : 0);
         command(`${prefix}-hip`, `${prefix}-hip-joint`, hipTarget);
+        command(`${prefix}-hip-roll`, `${prefix}-hip-joint`, rollTarget, 2.5, 2);
+        command(`${prefix}-hip-yaw`, `${prefix}-hip-joint`, yawTarget, 2.5, 4);
         command(`${prefix}-knee`, `${prefix}-knee-joint`, kneeTarget);
         if (joints.has(`${prefix}-paw`)) {
           signals.push(createControlSignal(`${prefix}-ankle`, clamp((moving ? 0.15 : 0) + sideSign * turn * 0.08)));
@@ -90,6 +102,7 @@ class LeopardMotorRuntime {
       }
     }
     command('leopard-spine-pitch', 'leopard-spine-joint', -pitch * 0.12, 1.8);
+    command('leopard-spine-yaw', 'leopard-spine-joint', -turn * 0.65, 3, 4);
     command('leopard-neck-pitch', 'leopard-neck-joint', intent.skill === 'interact' ? 0.25 : 0.02, 1.8);
     command('leopard-jaw-close', 'leopard-jaw-joint', intent.skill === 'interact' ? 0.30 : -0.12, 2);
     return signals;

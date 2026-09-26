@@ -136,6 +136,7 @@ function revolute(
   axis: Vector3,
   load: ConnectionLoad,
   limits?: { readonly min: number; readonly max: number },
+  passiveAngular?: Connection['passiveAngular'],
 ): Connection {
   return {
     id,
@@ -146,9 +147,31 @@ function revolute(
     toAnchor,
     axis,
     ...(limits ? { limits } : {}),
+    ...(passiveAngular ? { passiveAngular } : {}),
     ...load,
   };
 }
+
+function spherical(
+  id: string,
+  fromPartId: string,
+  toPartId: string,
+  fromAnchor: Vector3,
+  toAnchor: Vector3,
+  load: ConnectionLoad,
+  passiveAngular: Connection['passiveAngular'],
+): Connection {
+  return { id, kind: 'spherical', fromPartId, toPartId, fromAnchor, toAnchor,
+    passiveAngular, ...load };
+}
+
+const pitchSupport = (stiffnessNmPerRad: number, dampingNmsPerRad: number) =>
+  [{ axis: vector(0, 0, 1), restAngle: 0, stiffnessNmPerRad, dampingNmsPerRad }];
+const ballSupport = (pitch: number, roll: number, yaw: number) => [
+  { axis: vector(0, 0, 1), restAngle: 0, stiffnessNmPerRad: pitch, dampingNmsPerRad: 18 },
+  { axis: vector(1, 0, 0), restAngle: 0, stiffnessNmPerRad: roll, dampingNmsPerRad: 45 },
+  { axis: vector(0, 1, 0), restAngle: 0, stiffnessNmPerRad: yaw, dampingNmsPerRad: 35 },
+];
 
 function rigid(
   id: string,
@@ -233,7 +256,7 @@ function contactSensor(
  *
  * The Blueprint contains no animal-specific Core types or outcome shortcuts.
  * It is an ordinary articulated structure: a low torso, four jointed legs,
- * a revolute spine/neck/jaw, and three revolute tail segments. `facing: -1`
+ * a spherical spine/shoulders/hips, revolute neck/jaw, and three tail segments. `facing: -1`
  * rotates every initial Part pose by pi around local Y so two instances can
  * face one another while all anchors and sensor directions remain local.
  */
@@ -271,17 +294,17 @@ export function createLeopardBlueprint(options: LeopardBlueprintOptions = {}): B
   }
 
   const connections: Connection[] = [
-    revolute('leopard-spine-joint', 'leopard-chest', 'leopard-pelvis',
-      vector(-0.72, -0.06, 0), vector(0.52, 0, 0), vector(0, 0, 1), bodyConnectionLoad,
-      { min: -0.45, max: 0.45 }),
+    spherical('leopard-spine-joint', 'leopard-chest', 'leopard-pelvis',
+      vector(-0.72, -0.06, 0), vector(0.52, 0, 0), bodyConnectionLoad,
+      ballSupport(220, 300, 60)),
     revolute('leopard-neck-joint', 'leopard-chest', 'leopard-neck',
       vector(0.72, 0.21, 0), vector(-0.17, 0, 0), vector(0, 0, 1), bodyConnectionLoad,
-      { min: -0.65, max: 0.5 }),
+      { min: -0.65, max: 0.5 }, pitchSupport(38, 4)),
     rigid('leopard-neck-head', 'leopard-neck', 'leopard-head',
       vector(0.17, 0, 0), vector(-0.3, -0.14, 0), bodyConnectionLoad),
     revolute('leopard-jaw-joint', 'leopard-head', 'leopard-jaw',
       vector(-0.16, -0.22, 0), vector(-0.35, 0.06, 0), vector(0, 0, 1), limbConnectionLoad,
-      { min: -0.1, max: 0.7 }),
+      { min: -0.1, max: 0.7 }, pitchSupport(8, 1.2)),
     revolute('leopard-pelvis-tail-1', 'leopard-pelvis', 'leopard-tail-1',
       vector(-0.52, -0.05, 0), vector(0.28, 0, 0), vector(0, 0, 1), bodyConnectionLoad,
       { min: -0.6, max: 0.6 }),
@@ -298,35 +321,41 @@ export function createLeopardBlueprint(options: LeopardBlueprintOptions = {}): B
     const lower = legPartId(leg, 'lower');
     const paw = legPartId(leg, 'paw');
     connections.push(
-    revolute(legJointConnectionId(leg, 'hip'), leg.torsoPartId, upper,
+    spherical(legJointConnectionId(leg, 'hip'), leg.torsoPartId, upper,
         vector(
           leg.x - (leg.torsoPartId === 'leopard-chest' ? 0.25 : -0.99),
           leg.torsoPartId === 'leopard-chest' ? -0.07 : -0.01,
           leg.z,
         ),
-        vector(0, 0.2, 0), vector(0, 0, 1), limbConnectionLoad,
-        { min: -0.8, max: 0.8 }),
+        vector(0, 0.2, 0), limbConnectionLoad,
+        ballSupport(110, 420, 80)),
     revolute(legJointConnectionId(leg, 'knee'), upper, lower,
         vector(0, -0.2, 0), vector(0, 0.16, 0), vector(0, 0, 1), limbConnectionLoad,
-        { min: -1.35, max: 0.75 }),
+        { min: -1.35, max: 0.75 }, pitchSupport(65, 12)),
       revolute(legPawConnectionId(leg), lower, paw,
         vector(0, -0.16, 0), vector(-0.04, 0.07, 0), vector(0, 0, 1), pawConnectionLoad,
-        { min: -0.6, max: 0.6 }),
+        { min: -0.6, max: 0.6 }, pitchSupport(45, 10)),
     );
   }
 
   const actuators: JointActuator[] = [];
   for (const leg of legs) {
     actuators.push(
-      jointActuator(legActuatorId(leg, 'hip'), legJointConnectionId(leg, 'hip'), 36),
-      jointActuator(legActuatorId(leg, 'knee'), legJointConnectionId(leg, 'knee'), 30),
-      jointActuator(`leopard-${leg.region}-${leg.side}-ankle`, legPawConnectionId(leg), 16),
+      { ...jointActuator(legActuatorId(leg, 'hip'), legJointConnectionId(leg, 'hip'), 100),
+        axis: vector(0, 0, 1) },
+      { ...jointActuator(`leopard-${leg.region}-${leg.side}-hip-roll`, legJointConnectionId(leg, 'hip'), 24),
+        axis: vector(1, 0, 0) },
+      { ...jointActuator(`leopard-${leg.region}-${leg.side}-hip-yaw`, legJointConnectionId(leg, 'hip'), 60),
+        axis: vector(0, 1, 0) },
+      jointActuator(legActuatorId(leg, 'knee'), legJointConnectionId(leg, 'knee'), 65),
+      jointActuator(`leopard-${leg.region}-${leg.side}-ankle`, legPawConnectionId(leg), 25),
     );
   }
   actuators.push(
     jointActuator('leopard-jaw-close', 'leopard-jaw-joint', 18),
     jointActuator('leopard-neck-pitch', 'leopard-neck-joint', 24),
-    jointActuator('leopard-spine-pitch', 'leopard-spine-joint', 28),
+    { ...jointActuator('leopard-spine-pitch', 'leopard-spine-joint', 28), axis: vector(0, 0, 1) },
+    { ...jointActuator('leopard-spine-yaw', 'leopard-spine-joint', 50), axis: vector(0, 1, 0) },
     jointActuator('leopard-tail-1-pitch', 'leopard-pelvis-tail-1', 12),
     jointActuator('leopard-tail-2-pitch', 'leopard-tail-1-tail-2', 10),
     jointActuator('leopard-tail-3-pitch', 'leopard-tail-2-tail-3', 8),

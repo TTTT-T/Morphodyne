@@ -8,6 +8,7 @@ import type {
   Geometry,
   Material,
   Part,
+  RigidConnection,
   Sensor,
   Vector3,
 } from '../core/model';
@@ -137,7 +138,7 @@ function localizeValidationError(message: string): string {
     'Invalid connection limits': '连接范围无效',
     'Invalid or duplicate actuator id': '执行器编号为空或重复',
     'Unknown actuator connection': '执行器引用了不存在的连接',
-    'Actuator requires a revolute or prismatic connection': '执行器需要旋转或滑动连接',
+    'Actuator requires a movable connection': '执行器需要可动连接',
     'Invalid or duplicate sensor id': '传感器编号为空或重复',
     'Unknown sensor part': '传感器引用了不存在的部件',
   };
@@ -298,7 +299,7 @@ function selectedGeometry(part: Part, kind: Geometry['kind'], a: string, b: stri
   }
 }
 
-function buildRigidConnection(id: string, from: Part, to: Part): Connection {
+function buildRigidConnection(id: string, from: Part, to: Part): RigidConnection {
   const worldAnchor = from.pose.position;
   const toLocal = inverseRotate({
     x: worldAnchor.x - to.pose.position.x,
@@ -597,7 +598,7 @@ export function mountGodSandboxPanel(
   const connectionFrom = labeled(connectionEndpoints, '部件一', selectInput());
   const connectionTo = labeled(connectionEndpoints, '部件二', selectInput());
   const newConnectionKind = labeled(connections, '新连接种类', selectInput());
-  for (const [kind, label] of [['rigid', '固定'], ['revolute', '旋转'], ['prismatic', '滑动']] as const) addOption(newConnectionKind, kind, label);
+  for (const [kind, label] of [['rigid', '固定'], ['revolute', '旋转'], ['spherical', '球形（三轴）'], ['prismatic', '滑动']] as const) addOption(newConnectionKind, kind, label);
   button(connectionEndpoints, '连接部件', () => run('已连接部件', () => {
     requireEdit();
     const inspection = requireInspection();
@@ -609,7 +610,10 @@ export function mountGodSandboxPanel(
       makeId('connection', inspection.blueprint.connections.map((connection) => connection.id)), from, to,
     );
     const connection: Connection = newConnectionKind.value === 'rigid' ? rigid
-      : { ...rigid, kind: newConnectionKind.value as 'revolute' | 'prismatic', axis: { x: 0, y: 0, z: 1 } };
+      : newConnectionKind.value === 'spherical' ? { ...rigid, kind: 'spherical' }
+      : newConnectionKind.value === 'prismatic'
+        ? { ...rigid, kind: 'prismatic', axis: { x: 0, y: 0, z: 1 } }
+        : { ...rigid, kind: 'revolute', axis: { x: 0, y: 0, z: 1 } };
     construction.addConnection(requireEntity(), connection);
   }, true));
   connections.append(connectionEndpoints);
@@ -617,7 +621,7 @@ export function mountGodSandboxPanel(
   connectionActions.className = 'god-sandbox-actions';
   connections.append(connectionActions);
   const connectionKind = labeled(connections, '选中连接种类', selectInput());
-  for (const [kind, label] of [['rigid', '固定'], ['revolute', '旋转'], ['prismatic', '滑动']] as const) addOption(connectionKind, kind, label);
+  for (const [kind, label] of [['rigid', '固定'], ['revolute', '旋转'], ['spherical', '球形（三轴）'], ['prismatic', '滑动']] as const) addOption(connectionKind, kind, label);
   const fromAnchorInputs = vectorInputs(connections, '端点一锚点');
   const toAnchorInputs = vectorInputs(connections, '端点二锚点');
   const axisInputs = vectorInputs(connections, '轴向', { x: 0, y: 0, z: 1 });
@@ -636,9 +640,15 @@ export function mountGodSandboxPanel(
       ultimateTorqueNm: current.ultimateTorqueNm,
       fromAnchor: readVector(fromAnchorInputs, '端点一锚点'), toAnchor: readVector(toAnchorInputs, '端点二锚点') };
     const connection: Connection = connectionKind.value === 'rigid' ? { ...base, kind: 'rigid' }
-      : { ...base, kind: connectionKind.value as 'revolute' | 'prismatic',
-        axis: readVector(axisInputs, '轴向'),
-        limits: { min: parseNumber(limitMin.value, '范围下限'), max: parseNumber(limitMax.value, '范围上限') } };
+      : connectionKind.value === 'spherical'
+        ? { ...base, kind: 'spherical',
+          ...(current.kind === 'spherical' && current.passiveAngular ? { passiveAngular: current.passiveAngular } : {}) }
+        : connectionKind.value === 'prismatic'
+          ? { ...base, kind: 'prismatic', axis: readVector(axisInputs, '轴向'),
+            limits: { min: parseNumber(limitMin.value, '范围下限'), max: parseNumber(limitMax.value, '范围上限') } }
+          : { ...base, kind: 'revolute', axis: readVector(axisInputs, '轴向'),
+            limits: { min: parseNumber(limitMin.value, '范围下限'), max: parseNumber(limitMax.value, '范围上限') },
+            ...(current.kind === 'revolute' && current.passiveAngular ? { passiveAngular: current.passiveAngular } : {}) };
     construction.replaceBlueprint(inspection.entity.id, { ...inspection.blueprint,
       connections: inspection.blueprint.connections.map((entry) => entry.id === current.id ? connection : entry) });
   }, true));
@@ -682,6 +692,7 @@ export function mountGodSandboxPanel(
   addOption(actuatorKind, 'joint', '关节执行器');
   addOption(actuatorKind, 'tension', '拉力执行器');
   const actuatorConnection = labeled(attachments, '驱动连接', selectInput());
+  const actuatorAxisInputs = vectorInputs(attachments, '球形关节驱动轴', { x: 0, y: 0, z: 1 });
   const tensionFrom = labeled(attachments, '拉力端点一部件', selectInput());
   const tensionTo = labeled(attachments, '拉力端点二部件', selectInput());
   const tensionFromInputs = vectorInputs(attachments, '端点一位置');
@@ -707,8 +718,9 @@ export function mountGodSandboxPanel(
         toAttachment: readVector(tensionToInputs, '端点二位置') };
     }
     const connection = requireInspection().blueprint.connections.find((entry) => entry.id === actuatorConnection.value);
-    if (!connection || (connection.kind !== 'revolute' && connection.kind !== 'prismatic')) throw new Error('请选择旋转或滑动连接');
-    return { ...common, kind: 'joint', connectionId: connection.id };
+    if (!connection || connection.kind === 'rigid') throw new Error('请选择可动连接');
+    return { ...common, kind: 'joint', connectionId: connection.id,
+      ...(connection.kind === 'spherical' ? { axis: readVector(actuatorAxisInputs, '球形关节驱动轴') } : {}) };
   }
   const updateActuatorButton = button(actuatorActions, '应用执行器修改', () => run('执行器已更新', () => {
     requireEdit();
@@ -826,7 +838,7 @@ export function mountGodSandboxPanel(
   partGeometryKind.addEventListener('change', () => { partDraftDirty = true; });
   for (const control of [materialFriction, materialDensity, materialYieldForce, materialUltimateForce]) control.addEventListener('input', () => { materialDraftDirty = true; });
   for (const control of [connectionKind, ...fromAnchorInputs, ...toAnchorInputs, ...axisInputs, limitMin, limitMax, connectionStrength]) control.addEventListener('input', () => { connectionDraftDirty = true; });
-  for (const control of [actuatorKind, actuatorConnection, tensionFrom, tensionTo, ...tensionFromInputs, ...tensionToInputs, maxOutputInput, responseInput]) control.addEventListener('input', () => { actuatorDraftDirty = true; });
+  for (const control of [actuatorKind, actuatorConnection, ...actuatorAxisInputs, tensionFrom, tensionTo, ...tensionFromInputs, ...tensionToInputs, maxOutputInput, responseInput]) control.addEventListener('input', () => { actuatorDraftDirty = true; });
 
   const inspectionDetails = document.createElement('details');
   inspectionDetails.className = 'god-sandbox-collapsed';
@@ -984,7 +996,10 @@ export function mountGodSandboxPanel(
           tensionTo.value = actuator.toPartId;
           setVector(tensionFromInputs, actuator.fromAttachment);
           setVector(tensionToInputs, actuator.toAttachment);
-        } else actuatorConnection.value = actuator.connectionId;
+        } else {
+          actuatorConnection.value = actuator.connectionId;
+          setVector(actuatorAxisInputs, actuator.axis ?? { x: 0, y: 0, z: 1 });
+        }
       }
     }
     const activeActuatorIds = new Set(entity.actuatorIds);
@@ -1035,7 +1050,7 @@ export function mountGodSandboxPanel(
       connectionKind.value = selectedConnection.connection.kind;
       setVector(fromAnchorInputs, selectedConnection.connection.fromAnchor);
       setVector(toAnchorInputs, selectedConnection.connection.toAnchor);
-      if (selectedConnection.connection.kind !== 'rigid') {
+      if (selectedConnection.connection.kind === 'revolute' || selectedConnection.connection.kind === 'prismatic') {
         setVector(axisInputs, selectedConnection.connection.axis);
         limitMin.value = String(selectedConnection.connection.limits?.min ?? -1);
         limitMax.value = String(selectedConnection.connection.limits?.max ?? 1);
