@@ -1,268 +1,354 @@
-# NEXT TASK — Animal Arena v0.3：关节限位 + 真正“会用身体”的对抗
+# NEXT TASK — Animal Arena v0.4：牵引与四足步态闭环
 
-当前 `codex/animal-arena-v0.2` 最新实现已经通过本轮方向审查：
+当前 `codex/animal-arena-v0.3` 最新提交已经完成：
 
-- Leopard 肩/髋与躯干已有通用 spherical Connection；
-- 多轴 Actuator / proprioception 已接通；
-- passive angular compliance 为通用 Connection 机制；
-- 单豹站立、前进、左右转向、受撞恢复已有真实物理实验；
-- 双豹能自主接近，并出现头部、前肢、下颌真实接触；
-- 没有发现 torso 扶正、直接推进、teleport、直接伤害或读取对手精确坐标等作弊路径。
+- 通用 spherical angular limits；
+- hard-ish limit 与 passive compliance 分离；
+- Leopard 肩/髋/脊柱配置可信活动范围；
+- 600 tick 长时站立；
+- 前进、左右转向；
+- 两种受撞恢复；
+- 双豹前肢/头/颌真实接触；
+- 无 torso 直接推进、隐藏扶正、teleport、直接伤害或读取对手精确坐标。
 
-下一阶段不要扩复杂 Brain，也不要做牙齿/爪伤害系统。
+但 v0.3 **尚未完整通过**。
 
-本阶段只解决两个相互关联的问题：
+唯一明确失败项是：
 
-> 1. 给通用 spherical Connection 增加真实可约束的角度活动范围；  
-> 2. 利用这套更可信的身体约束，让 Leopard 真正更会“使用自己的身体”完成稳定移动、转身、前肢接触和头颌定位。
+> 前进时支撑期足底滑移过大。当前支撑接触点平面位移代理约为胸腔位移的 2.513 倍，因此还不能证明 Leopard 的前进主要来自可信的步态牵引，而不是脚在地面上持续打滑。
 
----
-
-## 1. 通用 spherical angular limits
-
-当前 spherical 有三轴自由度和 passiveAngular，但没有硬角度限位。
-
-这会允许肩、髋、脊柱出现不合理的大角度旋转，污染后续动物行为。
-
-新增 backend-neutral 的通用角度约束能力。
-
-优先考虑：
-
-- swing / twist limits；
-- 或经过验证的 per-axis angular limits。
-
-要求：
-
-- 定义在 Core Connection 层；
-- 不得是 Leopard 专用字段；
-- 机械结构也能使用；
-- Blueprint 校验完整；
-- Sensor / Actuator 坐标定义保持一致；
-- Rapier adapter 中不得靠 setRotation / velocity clamp 假装限位。
-
-如果 Rapier 0.20 的 spherical runtime 无法直接提供公开 limit API，可以使用通用物理约束/恢复力矩实现，但必须明确区分：
-- hard-ish limit；
-- passive compliance；
-不能把两者混成一个模糊弹簧。
+下一阶段只解决这个问题。
 
 ---
 
-## 2. Leopard 使用合理的活动范围
+## 1. 核心目标
 
-把 Leopard 的这些部位配置合理范围：
-
-- 四个 shoulder / hip；
-- spine；
-- neck；
-- jaw；
-- 必要的 tail。
-
-目标不是解剖精确，而是：
-
-- 防止肩髋翻转；
-- 防止腿穿过躯干式异常姿态；
-- 限制脊柱和颈部进入明显不合理角度；
-- jaw 保持可信开合范围。
-
-所有参数必须只描述结构活动范围，不赋予能力。
-
----
-
-## 3. 不改 Brain 来掩盖身体问题
-
-保持：
+建立一个可测量、可解释的四足 locomotion traction 闭环：
 
 ```
-Sensor
-→ Brain
-→ Motor intent
-→ Actuator
-→ Connection
-→ Physics
+Brain 选择 approach / turn
+→ Motor 生成 stance / swing 协调
+→ Joint Actuator
+→ paw 与地面真实接触
+→ friction / normal force
+→ torso 位移
 ```
 
-Brain 继续只决定：
+目标不是让豹子跑得快，而是：
 
-- stand / recover；
-- approach；
-- turn；
-- interact。
-
-不要新增复杂攻击状态机。
-
-重点改进 Motor / body synergy：
-
-- 四足支撑；
-- 连续前进；
-- 左右转向；
-- 受撞后重新组织姿态；
-- 前肢 reach / brace；
-- head / neck orient；
-- jaw close/open。
-
-这些都必须通过现有/通用关节完成。
+> 身体前进主要来自足部周期性支撑和摆动，而不是四只脚在地面上持续滑行。
 
 ---
 
-## 4. “会用身体”的最低表现
+## 2. 先建立可信的牵引测量
 
-这一阶段不追求真实豹子动画。
+不要一上来继续调 friction 或 actuator。
 
-但应该明显比 v0.2 更接近：
+先把 locomotion 测量做清楚。
 
-- 身体不会靠关节无限翻转来完成动作；
-- 转向时肩髋真的侧向调整；
-- 前肢能够改变接触位置，而不是只前后摆；
-- 头颈可以调整咬合位置；
-- 被撞偏后能重新形成可用支撑；
-- 接触时身体姿态会根据当前感觉和物理反馈变化。
+至少记录每只 paw：
+
+- 是否接触地面；
+- 接触持续时间；
+- stance / swing 状态；
+- 接触期间 paw 世界速度；
+- 接触期间 paw 相对地面切向速度；
+- 接触期间 torso 水平速度；
+- normal / tangential contact proxy（现有接口能拿多少就用多少）；
+- 每一步的落地点和离地点；
+- stride length；
+- duty factor；
+- slip distance。
+
+定义一个通用、可重复的 traction 指标，例如：
+
+```
+stance slip ratio
+= stance 时 paw 相对地面滑移距离
+  / 同窗口 torso 前进距离
+```
+
+也可以设计更合理的指标，但必须解释清楚。
+
+不要只看“最后走了多远”。
 
 ---
 
-## 5. 真实实验
+## 3. 区分 stance 与 swing
 
-必须至少做以下可重复实验，并记录量化结果。
+当前 gait 主要是相位正弦目标。
 
-### A — 关节限位
+下一步允许在 `LeopardMotorRuntime` 内建立更明确的 body-owned locomotion synergy：
 
-对一个通用 spherical test body：
+- stance；
+- lift-off；
+- swing；
+- touchdown。
 
-- 分别沿 swing / twist 或各轴施加持续力矩；
-- 真实角度不得无限增长；
-- 到达限制附近后仍保持数值稳定；
-- 反向驱动可以离开限制。
+状态切换必须主要依据：
 
-### B — 长时站立
+- gait phase；
+- paw contact sensor；
+- proprioception；
+- joint state。
 
-单 Leopard 至少运行 600 tick。
+禁止依据：
 
-记录：
+- 对手精确坐标；
+- torso 世界速度目标直接反推外力；
+- 时间脚本指定“第几秒抬哪条腿”。
 
-- chest 最低高度；
-- torso upright；
-- 四足接触占比；
-- spherical joint 最大角度；
-- 能量。
+周期相位可以存在，但实际接触反馈必须能改变腿的状态。
 
-不得依赖身体级辅助力。
+---
 
-### C — 连续前进
+## 4. stance 阶段
 
-存在匿名前方目标。
+支撑腿目标：
 
-要求：
+- 保持 paw 相对地面更稳定；
+- 通过肩/髋、膝、踝关节变化推动身体经过支撑点；
+- 不允许直接锁定 paw 世界位置；
+- 不允许给 torso 推力。
 
-- Agent 通过自身感知决定 approach；
-- 连续运行后产生显著位移；
-- 不是滑行主导；
-- 至少多个 paw 有周期性接触变化。
+允许：
 
-### D — 左右转向
+- 根据 proprioception 调整 joint target；
+- 根据 paw contact 调整支撑刚度/目标角；
+- 合理利用 passive compliance；
+- 通用摩擦参数。
 
-左右目标分别测试。
+---
 
-要求：
+## 5. swing 阶段
 
-- heading 明显向目标方向改变；
-- shoulder / hip 的非单轴坐标确实参与变化；
-- 不允许直接 yaw torque 到 torso。
+摆动腿应：
 
-### E — 被撞恢复
+- 明确抬离地面；
+- 向前摆；
+- 再次落地；
+- 避免全程擦地。
 
-从不同侧向/斜向至少两种冲量测试。
+必须通过真实关节控制做到。
 
-要求：
+不要：
 
-- 身体姿态真实扰动；
-- 后续通过四肢/脊柱/接触重新进入可用状态；
-- 不要求每次完美恢复，但不能依赖隐藏复位。
+- setTranslation paw；
+- collision disable 作弊穿地；
+- teleport foot；
+- kinematic foot placement。
 
-### F — 双豹身体交互
+---
 
-无人控制运行。
+## 6. 不要用“无限摩擦”解决
 
-至少证明：
+可以测试不同 friction，但不能把问题简化成：
+
+```
+friction = 100
+```
+
+然后宣布成功。
+
+至少做：
+
+- 当前 friction；
+- 较低 friction；
+- 较高但合理 friction；
+
+三组对照。
+
+如果 gait 只有在极高摩擦下才能前进，说明 locomotion 仍有问题。
+
+---
+
+## 7. 四足协调
+
+第一版继续使用对角步态即可，不要求真实豹的完整步态库。
+
+但必须看到：
+
+- 不同 paw 有清晰的 stance / swing 切换；
+- 不应该四足同时长期滑动；
+- 至少一对对角腿能形成可解释的推进周期；
+- 转向时左右侧 stance/stride 存在真实差异。
+
+允许动作慢、笨。
+
+---
+
+## 8. 转向也要验证牵引
+
+左转、右转不能只看 heading。
+
+同时记录：
+
+- 左右 paw stance time；
+- 左右 paw slip；
+- shoulder / hip yaw/roll；
+- torso heading。
+
+证明：
+
+> 转向来自左右支撑与关节姿态差异，而不是身体在地面上横着滑。
+
+---
+
+## 9. 受撞恢复保留回归
+
+v0.3 已经有两种受撞恢复。
+
+本阶段不要重点调恢复，但必须保证 gait 改动后：
+
+- 长时站立仍稳定；
+- 两种受撞恢复不明显退化；
+- spherical limit 不被突破到异常范围。
+
+---
+
+## 10. 双豹 Arena 回归
+
+不要加新的攻击策略。
+
+只确认 gait 改善没有破坏：
 
 - 两个独立 Brain；
 - 自主接近；
-- front limb 与对方产生真实接触；
-- head/jaw 与对方产生真实接触；
-- 接触过程中 shoulder/hip/head joint posture 有实际调整；
-- 结果由 Physics 决定。
+- 前肢接触；
+- head/jaw 接触；
+- Energy；
+- Damage；
+- Observer。
+
+双豹接近速度可以变慢，但路径必须更可信。
 
 ---
 
-## 6. 不做
-
-本阶段先不要做：
-
-- HP；
-- attackPower；
-- biteDamage；
-- clawDamage；
-- Contact Concentration；
-- 牙齿穿刺；
-- 爪切割；
-- 神经网络；
-- 强化学习；
-- 复杂战斗策略；
-- 大型 UI 重做；
-- soft body；
-- 肌肉生物力学精确建模。
-
-如果 jaw / claw 的伤害差异确实成为下一阶段阻塞，再恢复 Contact Concentration。
-
----
-
-## 7. Anti-cheat
+## 11. Anti-cheat
 
 重点扫描：
 
-- torso direct force / torque；
-- setTranslation / setRotation 用于正常运动；
-- setLinvel / setAngvel 用于恢复；
-- hidden upright；
-- teleport rescue；
-- opponent exact pose；
-- scripted combat timeline；
-- direct damage；
-- grapple weld；
-- fixture-specific Physics branch。
+- torso direct force / impulse；
+- torso direct torque；
+- foot world-position lock；
+- kinematic paw；
+- teleport；
+- setLinvel / setAngvel 正常 locomotion；
+- friction 极端值；
+- fixture-specific physics branch；
+- scripted combat movement。
 
-正常 Arena 路径中出现即失败。
+出现这些则失败。
 
 ---
 
-## 8. 报告
+## 12. 验收实验
+
+### A — Traction metric baseline
+
+记录 v0.3 当前 gait 的四足 slip / stance / stride 数据。
+
+### B — 改进后直线前进
+
+至少 600 tick。
+
+要求：
+
+- 明显净前进；
+- 四个 paw 都出现多次 stance/swing；
+- stance slip ratio 显著低于 baseline；
+- 不允许靠极端摩擦；
+- torso 姿态保持可用。
+
+### C — 低摩擦对照
+
+降低合理范围内 floor/paw friction。
+
+预期：
+
+- traction 变差；
+- slip 增加；
+- locomotion 下降。
+
+这证明摩擦真的参与因果链，而不是 controller 在“假走”。
+
+### D — 左右转向
+
+记录左右腿 stance/slip/stride 差异。
+
+要求：
+
+- heading 向正确方向变化；
+- 至少部分转向能由不对称 foot-ground interaction 解释。
+
+### E — 长时稳定回归
+
+600 tick 站立和两种撞击恢复继续通过。
+
+### F — 双豹自主接近
+
+保持独立 Brain。
+
+记录：
+
+- 最小距离；
+- 接触 tick；
+- gait slip 指标；
+- 前肢/头颌接触。
+
+---
+
+## 13. 报告
 
 创建：
 
 ```
-ANIMAL_ARENA_V03_BODY_USE_REPORT.md
+ANIMAL_ARENA_V04_TRACTION_REPORT.md
 ```
 
-只回答：
+必须回答：
 
-1. spherical limit 如何表达；
-2. Rapier 如何实现；
-3. hard limit 与 passive compliance 如何区分；
-4. Leopard 各主要关节使用什么范围；
-5. 长时站立结果；
-6. 前进与左右转向结果；
-7. 两种受撞恢复结果；
-8. 双豹接触时前肢/头颌如何真实调整；
-9. 是否发现隐藏辅助路径；
-10. 下一步唯一最大的物理阻塞是什么。
+1. traction/slip 指标如何定义；
+2. v0.3 baseline 是多少；
+3. 新 gait 如何区分 stance / swing；
+4. paw contact 如何参与 motor control；
+5. 改进后的直线前进数据；
+6. 低摩擦对照；
+7. 左右转向时左右脚的差异；
+8. 是否仍有滑行主导现象；
+9. 是否出现任何 locomotion shortcut；
+10. 下一步最大的一个真实阻塞是什么。
 
 ---
 
-## 9. 工作方式
+## 14. 不做
 
-继续基于：
+本阶段不做：
+
+- Contact Concentration；
+- teeth / claw damage；
+- HP；
+- attackPower；
+- 神经网络；
+- 强化学习；
+- 新战斗状态机；
+- soft body；
+- UI 大改；
+- 高精模型。
+
+先把“走路”做可信。
+
+---
+
+## 15. 工作方式
+
+从：
 
 ```
-codex/animal-arena-v0.2
+codex/animal-arena-v0.3
 ```
+
+继续开发。
 
 这是一个完整任务，不要让用户中途传话。
 
@@ -281,4 +367,4 @@ codex/animal-arena-v0.2
 
 # 最终验收
 
-**Leopard 的肩、髋、脊柱等关节具有通用且可信的活动范围；它能够依靠自己的多自由度身体、感知和关节执行器完成更稳定的站立、前进、左右转向、受撞恢复以及近距离前肢/头颌姿态调整，而不是依靠无限关节旋转、身体级辅助力或更复杂的战斗脚本。**
+**Leopard 的前进和转向必须主要来自可测量的 stance/swing 四足步态与真实足地牵引，支撑期 paw 滑移显著下降，并且没有通过 torso 推进、足部世界锁定、极端摩擦或其他隐藏捷径制造移动结果。**
