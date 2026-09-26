@@ -44,6 +44,25 @@ describe('LeopardBlueprint', () => {
     ) === 0)).toHaveLength(4);
   });
 
+  it('constrains each generic spherical body joint on pitch, roll, and yaw', () => {
+    const blueprint = createLeopardBlueprint();
+    const spherical = blueprint.connections.filter((connection) => connection.kind === 'spherical');
+
+    expect(spherical).toHaveLength(5);
+    for (const connection of spherical) {
+      expect(connection.angularLimits).toHaveLength(3);
+      expect(connection.angularLimits?.map((limit) => limit.axis)).toEqual(expect.arrayContaining([
+        { x: 0, y: 0, z: 1 }, { x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 },
+      ]));
+      expect(connection.angularLimits?.every((limit) => limit.min < 0 && limit.max > 0
+        && limit.stiffnessNmPerRad > 0 && limit.dampingNmsPerRad >= 0 && limit.maxTorqueNm > 0)).toBe(true);
+    }
+    expect(spherical.find((connection) => connection.id === 'leopard-spine-joint')?.angularLimits)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ axis: { x: 0, y: 0, z: 1 }, min: -0.38, max: 0.38 }),
+      ]));
+  });
+
   it('rotates the complete body for a facing -X instance while retaining local channels', () => {
     const forward = createLeopardBlueprint();
     const reverse = createLeopardBlueprint({ facing: -1 });

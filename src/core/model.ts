@@ -121,11 +121,27 @@ export interface PassiveAngular {
   readonly maxTorqueNm?: number;
 }
 
+/**
+ * A unilateral angular stop about an axis in the from-Part's local frame.
+ * Angles use the same Blueprint-relative coordinate as joint sensing and
+ * actuation. Unlike passive compliance, the stop applies no torque inside
+ * its range. Finite stiffness and torque make this a hard-ish physical stop.
+ */
+export interface AngularLimit {
+  readonly axis: Vector3;
+  readonly min: number;
+  readonly max: number;
+  readonly stiffnessNmPerRad: number;
+  readonly dampingNmsPerRad: number;
+  readonly maxTorqueNm: number;
+}
+
 export interface RigidConnection extends ConnectionBase {
   readonly kind: 'rigid';
   readonly axis?: never;
   readonly limits?: never;
   readonly passiveAngular?: never;
+  readonly angularLimits?: never;
 }
 
 export interface JointLimits {
@@ -139,6 +155,7 @@ export interface RevoluteConnection extends ConnectionBase {
   readonly axis: Vector3;
   readonly limits?: JointLimits;
   readonly passiveAngular?: readonly PassiveAngular[];
+  readonly angularLimits?: never;
 }
 
 export interface SphericalConnection extends ConnectionBase {
@@ -147,6 +164,7 @@ export interface SphericalConnection extends ConnectionBase {
   readonly axis?: never;
   readonly limits?: never;
   readonly passiveAngular?: readonly PassiveAngular[];
+  readonly angularLimits?: readonly AngularLimit[];
 }
 
 export interface PrismaticConnection extends ConnectionBase {
@@ -155,6 +173,7 @@ export interface PrismaticConnection extends ConnectionBase {
   readonly axis: Vector3;
   readonly limits?: JointLimits;
   readonly passiveAngular?: never;
+  readonly angularLimits?: never;
 }
 
 export type Connection = RigidConnection | RevoluteConnection | SphericalConnection | PrismaticConnection;
@@ -365,9 +384,10 @@ export function validateBlueprint(blueprint: Blueprint): string[] {
       readonly axis?: Vector3;
       readonly limits?: JointLimits;
       readonly passiveAngular?: readonly PassiveAngular[];
+      readonly angularLimits?: readonly AngularLimit[];
     };
     if (runtimeOptions.kind === 'rigid') {
-      if (runtimeOptions.axis !== undefined || runtimeOptions.limits !== undefined || runtimeOptions.passiveAngular !== undefined) {
+      if (runtimeOptions.axis !== undefined || runtimeOptions.limits !== undefined || runtimeOptions.passiveAngular !== undefined || runtimeOptions.angularLimits !== undefined) {
         errors.push(`Invalid rigid connection options: ${connection.id}`);
       }
       continue;
@@ -380,6 +400,46 @@ export function validateBlueprint(blueprint: Blueprint): string[] {
 
     if (runtimeOptions.kind !== 'revolute' && runtimeOptions.kind !== 'spherical' && runtimeOptions.passiveAngular !== undefined) {
       errors.push(`Invalid passiveAngular: ${connection.id}`);
+    }
+
+    if (runtimeOptions.angularLimits !== undefined) {
+      if (runtimeOptions.kind !== 'spherical' || !Array.isArray(runtimeOptions.angularLimits)
+        || runtimeOptions.angularLimits.length === 0) {
+        errors.push(`Invalid angularLimits: ${connection.id}`);
+      } else {
+        const priorAxes: Vector3[] = [];
+        for (const limit of runtimeOptions.angularLimits) {
+          if (!limit || typeof limit !== 'object') {
+            errors.push(`Invalid angularLimits entry: ${connection.id}`);
+            continue;
+          }
+          if (!limit.axis || !isFiniteVector(limit.axis)
+            || limit.axis.x ** 2 + limit.axis.y ** 2 + limit.axis.z ** 2 <= VECTOR_EPSILON_SQUARED) {
+            errors.push(`Invalid angularLimits axis: ${connection.id}`);
+          } else {
+            const magnitude = Math.hypot(limit.axis.x, limit.axis.y, limit.axis.z);
+            const axis = { x: limit.axis.x / magnitude, y: limit.axis.y / magnitude, z: limit.axis.z / magnitude };
+            if (priorAxes.some((prior) => Math.abs(prior.x * axis.x + prior.y * axis.y + prior.z * axis.z) > 0.999)) {
+              errors.push(`Duplicate angularLimits axis: ${connection.id}`);
+            }
+            priorAxes.push(axis);
+          }
+          if (!Number.isFinite(limit.min) || !Number.isFinite(limit.max)
+            || limit.min >= limit.max || limit.min <= -Math.PI || limit.max >= Math.PI
+            || limit.min > 0 || limit.max < 0) {
+            errors.push(`Invalid angularLimits range: ${connection.id}`);
+          }
+          if (!Number.isFinite(limit.stiffnessNmPerRad) || limit.stiffnessNmPerRad <= 0) {
+            errors.push(`Invalid angularLimits stiffness: ${connection.id}`);
+          }
+          if (!Number.isFinite(limit.dampingNmsPerRad) || limit.dampingNmsPerRad < 0) {
+            errors.push(`Invalid angularLimits damping: ${connection.id}`);
+          }
+          if (!Number.isFinite(limit.maxTorqueNm) || limit.maxTorqueNm <= 0) {
+            errors.push(`Invalid angularLimits maxTorqueNm: ${connection.id}`);
+          }
+        }
+      }
     }
 
     if (runtimeOptions.passiveAngular !== undefined) {

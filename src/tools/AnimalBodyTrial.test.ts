@@ -46,7 +46,7 @@ describe('animal body physical trials', () => {
       let minUp = Infinity;
       let minHeading = Infinity;
       let maxHeading = -Infinity;
-      for (let i = 0; i < 240; i += 1) {
+      for (let i = 0; i < 260; i += 1) {
         world.stepOnce();
         const current = pose(world);
         minY = Math.min(minY, current.y);

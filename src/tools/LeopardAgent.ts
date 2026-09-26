@@ -11,7 +11,7 @@ export class EngagementDecisionPolicy implements DecisionPolicy {
     const orientation = selfModel.orientation?.value;
     const upY = orientation
       ? 1 - 2 * (orientation[0] ** 2 + orientation[2] ** 2) : 1;
-    if (upY < 0.35 || selfModel.stability.level === 'unstable' || selfModel.feedbackGapRecent) {
+    if (upY < 0.9 || selfModel.stability.level === 'unstable' || selfModel.feedbackGapRecent) {
       return { goal: { kind: 'maintain-stability', desiredState: 'recover a usable posture' },
         affordance: { id: 'recover-posture', goalKind: 'maintain-stability', skill: 'stand' } };
     }
@@ -62,17 +62,28 @@ class LeopardMotorRuntime {
     const intent = brain.skillIntent;
     const moving = intent.skill === 'approach' || intent.skill === 'interact' || intent.skill === 'turn';
     if (moving) this.phase = (this.phase + seconds * Math.PI * 2 * 1.2) % (Math.PI * 2);
-    const turn = clamp(intent.turn ?? (intent.skill === 'turn' ? 0.45 : 0));
+    const turnScale = intent.skill === 'turn' ? 1.15 : 1;
+    const turn = clamp(turnScale * (intent.turn ?? (intent.skill === 'turn' ? 0.45 : 0)));
     const orientation = brain.selfModel.orientation?.value;
     const roll = orientation ? 2 * (orientation[3] * orientation[0] + orientation[1] * orientation[2]) : 0;
     const pitch = orientation ? 2 * (orientation[3] * orientation[2] - orientation[0] * orientation[1]) : 0;
+    const currentReturns = brain.worldModel.ranges
+      .filter((sample) => sample.expiresAtTick >= brain.worldModel.tick && sample.localDirection[0] > 0.35)
+      .sort((a, b) => a.distance - b.distance);
+    const nearest = currentReturns[0];
+    const nearDirections = nearest ? currentReturns.filter((sample) => sample.distance <= nearest.distance + 0.35) : [];
+    const targetSide = clamp(nearDirections.length
+      ? nearDirections.reduce((sum, sample) => sum + sample.localDirection[2], 0) / nearDirections.length : 0);
+    const targetDistance = nearest?.distance ?? 2;
+    const observedSensors = new Set(brain.selfModel.observedSensorIds);
+    const contactFor = (prefix: string): boolean => observedSensors.has(`${prefix}-paw-contact`);
     const signals: ControlSignal[] = [];
     const command = (actuatorId: string, connectionId: string, target: number,
-      gain = 3.5, coordinate = 0): void => {
+      gain = 3.5, coordinate = 0, velocityGain = 0.28): void => {
       const state = joints.get(connectionId);
       if (!state || !Number.isFinite(state[coordinate]) || !Number.isFinite(state[coordinate + 1])) return;
       signals.push(createControlSignal(actuatorId,
-        clamp(gain * (target - state[coordinate]) - 0.28 * state[coordinate + 1])));
+        clamp(gain * (target - state[coordinate]) - velocityGain * state[coordinate + 1])));
     };
     for (const end of ['front', 'hind'] as const) {
       for (const side of ['left', 'right'] as const) {
@@ -80,24 +91,45 @@ class LeopardMotorRuntime {
         const sideSign = side === 'left' ? -1 : 1;
         const phase = this.phase + ((end === 'front') === (side === 'left') ? 0 : Math.PI);
         const stride = moving ? Math.sin(phase) : 0;
+        const footContact = contactFor(prefix);
         const reaching = intent.skill === 'interact' && end === 'front';
+        const kneeState = joints.get(`${prefix}-knee-joint`);
+        const kneeAngle = kneeState?.[0] ?? 0;
+        // A sensed paw contact and the measured knee coordinate select the
+        // lift/extend transition. No combat timeline or opponent identity is
+        // required: once the knee has visibly cleared its supported posture,
+        // the same actuators can extend and brace toward the anonymous return.
+        const lifting = reaching && !footContact && kneeAngle < 0.35;
+        const bracing = reaching && !lifting;
         const strideScale = intent.skill === 'turn' ? sideSign * turn : 1 + sideSign * turn * 0.8;
-        const hipTarget = 0.38 * stride * strideScale
-          + (reaching ? 0.28 : 0)
+        const reachBias = reaching ? targetSide * sideSign * 0.18 : 0;
+        const hipTarget =
+          (end === 'hind' ? 0.6 : 0.25) * stride * strideScale
+          + (bracing ? 1.1 + Math.max(0, 0.45 - targetDistance) * 0.12 + reachBias : reaching ? 0.28 : 0)
           + (end === 'front' ? -pitch : pitch) * 0.15 + sideSign * roll * 0.18;
-        const kneeTarget = reaching ? 0.12 : -0.08 - (moving ? 0.55 * Math.max(0, stride) : 0);
+        const kneeTarget = bracing
+          ? 0.9 + Math.max(0, 0.45 - targetDistance) * 0.08
+          : reaching ? (lifting ? 0.62 : 0.12)
+          : -0.08 - (moving ? 0.55 * Math.max(0, stride) : 0);
         // Spherical joints expose pitch, roll and yaw through the same physical
         // connection. These are ordinary actuator targets based on sensed
         // joint coordinates; ground contact determines whether they turn or reach.
-        const rollTarget = -sideSign * (reaching ? 0.3 : 0.1) - turn * 0.12;
+        const rollTarget = -sideSign * (reaching ? 0.3 : 0.1)
+          + (intent.skill === 'stand' ? 1.2 * roll : 0)
+          + (reaching ? targetSide * sideSign * 0.2 : 0) - turn * 0.12;
         const yawTarget = -turn * (end === 'front' ? 0.45 : -0.3)
+          + (reaching ? targetSide * sideSign * 0.14 : 0)
           + (moving ? 0.08 * stride : 0);
-        command(`${prefix}-hip`, `${prefix}-hip-joint`, hipTarget);
-        command(`${prefix}-hip-roll`, `${prefix}-hip-joint`, rollTarget, 2.5, 2);
-        command(`${prefix}-hip-yaw`, `${prefix}-hip-joint`, yawTarget, 2.5, 4);
-        command(`${prefix}-knee`, `${prefix}-knee-joint`, kneeTarget);
+        const reachGain = bracing ? 0.8 : 3.5;
+        const reachVelocityGain = bracing ? 0.6 : 0.28;
+        command(`${prefix}-hip`, `${prefix}-hip-joint`, hipTarget, reachGain, 0, reachVelocityGain);
+        command(`${prefix}-hip-roll`, `${prefix}-hip-joint`, rollTarget, bracing ? 1.4 : 2.5, 2, reachVelocityGain);
+        command(`${prefix}-hip-yaw`, `${prefix}-hip-joint`, yawTarget, bracing ? 1.4 : 2.5, 4, reachVelocityGain);
+        command(`${prefix}-knee`, `${prefix}-knee-joint`, kneeTarget, reachGain, 0, reachVelocityGain);
         if (joints.has(`${prefix}-paw`)) {
-          signals.push(createControlSignal(`${prefix}-ankle`, clamp((moving ? 0.15 : 0) + sideSign * turn * 0.08)));
+          const ankleTarget = moving ? 0.15 + sideSign * turn * 0.08
+            : intent.skill === 'stand' && brain.selfModel.stability.level === 'stable' && footContact ? -0.04 : 0;
+          signals.push(createControlSignal(`${prefix}-ankle`, clamp(ankleTarget)));
         }
       }
     }

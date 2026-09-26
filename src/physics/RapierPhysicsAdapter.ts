@@ -1,5 +1,5 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import type { Connection, Entity, Material, Part, PassiveAngular, Pose, Quaternion, Vector3 } from '../core/model';
+import type { AngularLimit, Connection, Entity, Material, Part, PassiveAngular, Pose, Quaternion, Vector3 } from '../core/model';
 import { validateBlueprint } from '../core/model';
 import type {
   BodyHandle,
@@ -19,6 +19,7 @@ interface RuntimeConnection {
   readonly kind: Connection['kind'];
   readonly axis?: Vector3;
   readonly passiveAngular?: readonly PassiveAngular[];
+  readonly angularLimits?: readonly AngularLimit[];
   readonly from: RAPIER.RigidBody;
   readonly to: RAPIER.RigidBody;
   readonly fromAnchor: Vector3;
@@ -28,7 +29,8 @@ interface RuntimeConnection {
   jointHandle?: number;
   broken: boolean;
   actuatorOutput?: number;
-  passiveTorqueWorld?: Vector3;
+  actuatorTorqueWorld?: Vector3;
+  supportTorqueWorld?: Vector3;
 }
 
 interface RuntimePhysicsBody {
@@ -491,6 +493,12 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
             axis: unitVector(entry.axis),
           })),
         } : {}),
+        ...(connection.kind === 'spherical' && connection.angularLimits ? {
+          angularLimits: connection.angularLimits.map((entry) => ({
+            ...entry,
+            axis: unitVector(entry.axis),
+          })),
+        } : {}),
         jointHandle: connectionHandles.get(connection.id)!,
         broken: false,
       });
@@ -784,6 +792,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     } else {
       connection.from.addTorque(negate(effort), true);
       connection.to.addTorque(effort, true);
+      connection.actuatorTorqueWorld = add(connection.actuatorTorqueWorld ?? { x: 0, y: 0, z: 0 }, effort);
       this.recordWrench(connection.from, { x: 0, y: 0, z: 0 }, negate(effort));
       this.recordWrench(connection.to, { x: 0, y: 0, z: 0 }, effort);
     }
@@ -882,7 +891,56 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
         if (!Number.isFinite(torque) || Math.abs(torque) <= 1e-12) continue;
         const toTorque = scale(worldAxis, torque);
         const fromTorque = negate(toTorque);
-        connection.passiveTorqueWorld = add(connection.passiveTorqueWorld ?? { x: 0, y: 0, z: 0 }, toTorque);
+        connection.supportTorqueWorld = add(connection.supportTorqueWorld ?? { x: 0, y: 0, z: 0 }, toTorque);
+        connection.from.addTorque(fromTorque, true);
+        connection.to.addTorque(toTorque, true);
+        this.recordWrench(connection.from, { x: 0, y: 0, z: 0 }, fromTorque);
+        this.recordWrench(connection.to, { x: 0, y: 0, z: 0 }, toTorque);
+        this.stepScopedForceBodies.add(connection.from);
+        this.stepScopedForceBodies.add(connection.to);
+      }
+    }
+  }
+
+  private applyAngularLimits(runtimeBody: RuntimePhysicsBody, seconds: number): void {
+    for (const connection of runtimeBody.connections.values()) {
+      if (connection.broken || !connection.angularLimits?.length) continue;
+      for (const limit of connection.angularLimits) {
+        const axis = limit.axis;
+        const angle = relativeJointAngle(connection, axis);
+        const error = angle < limit.min ? angle - limit.min
+          : angle > limit.max ? angle - limit.max : 0;
+        if (error === 0) continue;
+        const worldAxis = rotate(axis, connection.from.rotation());
+        const fromVelocity = connection.from.angvel();
+        const toVelocity = connection.to.angvel();
+        const velocity = dot({
+          x: toVelocity.x - fromVelocity.x,
+          y: toVelocity.y - fromVelocity.y,
+          z: toVelocity.z - fromVelocity.z,
+        }, worldAxis);
+        // A stop is unilateral: no centering torque inside the allowed range.
+        // Damping only opposes outward motion, leaving reverse drive free.
+        const outwardVelocity = Math.sign(error) === Math.sign(velocity) ? velocity : 0;
+        const inverseInertia = inverseInertiaAlong(connection.from, worldAxis)
+          + inverseInertiaAlong(connection.to, worldAxis);
+        const rawTorque = -limit.stiffnessNmPerRad * error
+          - limit.dampingNmsPerRad * outwardVelocity;
+        let torque = Math.max(-limit.maxTorqueNm, Math.min(limit.maxTorqueNm, rawTorque));
+        if (inverseInertia > 0 && Number.isFinite(inverseInertia)) {
+          // Bound the one-step angular-velocity correction of an explicit
+          // torque. A light link must not shoot through the opposite stop.
+          const desiredVelocity = -Math.sign(error) * Math.min(Math.abs(error) / seconds, 2);
+          const actuatorTorque = dot(connection.actuatorTorqueWorld ?? { x: 0, y: 0, z: 0 }, worldAxis);
+          const correctiveTorque = (desiredVelocity - velocity) / (inverseInertia * seconds) - actuatorTorque;
+          torque = error > 0 ? Math.max(torque, Math.min(0, correctiveTorque))
+            : Math.min(torque, Math.max(0, correctiveTorque));
+        }
+        torque = Math.max(-limit.maxTorqueNm, Math.min(limit.maxTorqueNm, torque));
+        if (!Number.isFinite(torque) || Math.abs(torque) <= 1e-12) continue;
+        const toTorque = scale(worldAxis, torque);
+        const fromTorque = negate(toTorque);
+        connection.supportTorqueWorld = add(connection.supportTorqueWorld ?? { x: 0, y: 0, z: 0 }, toTorque);
         connection.from.addTorque(fromTorque, true);
         connection.to.addTorque(toTorque, true);
         this.recordWrench(connection.from, { x: 0, y: 0, z: 0 }, fromTorque);
@@ -903,7 +961,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       }
     }
     for (const runtimeBody of this.activeRuntimeBodies) {
-      for (const connection of runtimeBody.connections.values()) connection.passiveTorqueWorld = undefined;
+      for (const connection of runtimeBody.connections.values()) connection.supportTorqueWorld = undefined;
       for (const partId of runtimeBody.latestPartImpulses.keys()) runtimeBody.latestPartImpulses.set(partId, 0);
       for (const partId of runtimeBody.latestPartAppliedImpulses.keys()) runtimeBody.latestPartAppliedImpulses.set(partId, 0);
       for (const partId of runtimeBody.latestPartContactLoads.keys()) runtimeBody.latestPartContactLoads.set(partId, { impulseNs: 0, forceN: 0 });
@@ -913,7 +971,10 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     // Passive supports are ordinary equal-and-opposite torques applied through
     // the connected bodies for this step. They never modify pose or velocity
     // directly and are included in the applied-wrench load estimate below.
-    for (const runtimeBody of this.activeRuntimeBodies) this.applyPassiveAngular(runtimeBody, seconds);
+    for (const runtimeBody of this.activeRuntimeBodies) {
+      this.applyPassiveAngular(runtimeBody, seconds);
+      this.applyAngularLimits(runtimeBody, seconds);
+    }
     this.world.step(this.eventQueue);
     for (const runtimeBody of this.activeRuntimeBodies) {
       for (const [partId, collider] of runtimeBody.partColliders) {
@@ -1015,11 +1076,11 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
             forceN = Math.abs(connection.actuatorOutput - observed);
           }
         }
-        // The passive pair is a declared load borne by this Connection. The
-        // momentum residual excludes submitted torques, so retain at least
+        // Declared passive and limit torques are loads borne by the Connection.
+        // The momentum residual excludes submitted torques, so retain at least
         // their measured resultant without double-counting solver reaction.
-        if (connection.passiveTorqueWorld) {
-          torqueNm = Math.max(torqueNm, magnitude(connection.passiveTorqueWorld));
+        if (connection.supportTorqueWorld) {
+          torqueNm = Math.max(torqueNm, magnitude(connection.supportTorqueWorld));
         }
         runtimeBody.latestConnectionLoads.set(connectionId, { forceN, torqueNm });
       }
@@ -1044,7 +1105,10 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     this.stepScopedForceBodies.clear();
     this.appliedWrenches.clear();
     for (const runtimeBody of this.activeRuntimeBodies) {
-      for (const connection of runtimeBody.connections.values()) connection.actuatorOutput = undefined;
+      for (const connection of runtimeBody.connections.values()) {
+        connection.actuatorOutput = undefined;
+        connection.actuatorTorqueWorld = undefined;
+      }
     }
   }
 

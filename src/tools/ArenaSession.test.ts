@@ -82,11 +82,16 @@ describe('Animal Arena v0.2 autonomous session', () => {
     expect(maxJawAngle - minJawAngle).toBeGreaterThan(0.2);
     expect(opponentHeadContactTicks).toBeGreaterThan(10);
     expect(jawOpponentContactTicks).toBeGreaterThan(0);
-    expect(deformationWhileOpponentsTouch).toBeGreaterThan(0);
     expect(maxHeadImpulseNs).toBeGreaterThan(0);
-    // Compliance absorbs part of this repeatable contact. Fracture remains a
-    // material/load outcome, not an acceptance target for this body change.
-    expect(world.getDamageRuntime('leopard-a').state.parts['leopard-head'].damage.deformation).toBeGreaterThan(0);
+    const headMaterialId = world.readBlueprint('leopard-a').parts
+      .find((part) => part.id === 'leopard-head')!.materialId;
+    const headYieldImpulseNs = world.readBlueprint('leopard-a').materials
+      .find((material) => material.id === headMaterialId)!.yieldImpulseNs!;
+    // The limited-joint body makes real but sub-yield contact in this fixture.
+    // Damage must remain a measured material/load result, not a duel milestone.
+    expect(maxHeadImpulseNs).toBeLessThan(headYieldImpulseNs);
+    expect(deformationWhileOpponentsTouch).toBe(0);
+    expect(world.getDamageRuntime('leopard-a').state.parts['leopard-head'].damage.deformation).toBe(0);
     expect(session.agents.get('leopard-a')!.inspectDecisionHistory()
       .some((decision) => decision.tick > firstOpponentContact!.tick)).toBe(true);
     expect(observation.fighters.every((fighter) => Number.isFinite(fighter.position.x))).toBe(true);

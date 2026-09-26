@@ -270,9 +270,15 @@ the Blueprint pose, stiffness, damping, and an optional torque cap. The physics
 adapter applies each support as equal and opposite torques to the connected
 Parts, while actuator output remains a separate energy-limited path. This gives
 the same mechanism to passive structures, machines, and Agents; contact and
-joint constraints still determine motion and load. A spherical joint has no
-hard angular limits in the current contract; a passive support is a soft
-restoring response, not a range constraint.
+joint constraints still determine motion and load. A spherical Connection may
+also declare independent `angularLimits` about from-Part local axes, using the
+same Blueprint-relative coordinate as proprioception and actuator output.
+Each limit defines a permitted interval and a unilateral stop with stiffness,
+damping, and a finite torque cap. Rapier 0.20 exposes no public spherical limit
+setter, so the adapter applies equal and opposite physical torques outside the
+interval. The stop is hard-ish and can overshoot under sufficient momentum or
+torque; passive support remains a separate centering response that acts inside
+the interval. Neither path directly edits pose or velocity.
 
 ### 4.5 Actuator
 
