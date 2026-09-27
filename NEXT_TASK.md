@@ -1,370 +1,342 @@
-# NEXT TASK — Animal Arena v0.4：牵引与四足步态闭环
+# NEXT TASK — Animal Arena v0.4 收口：持续支撑牵引必须真正过关
 
-当前 `codex/animal-arena-v0.3` 最新提交已经完成：
+当前 `codex/animal-arena-v0.4` 已经取得真实进展：
 
-- 通用 spherical angular limits；
-- hard-ish limit 与 passive compliance 分离；
-- Leopard 肩/髋/脊柱配置可信活动范围；
-- 600 tick 长时站立；
-- 前进、左右转向；
-- 两种受撞恢复；
-- 双豹前肢/头/颌真实接触；
-- 无 torso 直接推进、隐藏扶正、teleport、直接伤害或读取对手精确坐标。
+- 新增了明确的 `hold / stance / swing / seek` 四足步态状态；
+- Paw Contact 已参与 lift-off、touchdown、stance/seek 切换；
+- 四只 Paw 均能周期性离地并重新接触；
+- v0.3 baseline 与 v0.4 新 gait 已用同一套牵引仪器重新测量；
+- 低摩擦时位移下降、滑移上升，证明足地摩擦确实进入因果链；
+- 没看到 torso 直接推进、足部世界锁定、teleport、kinematic paw 等作弊。
 
-但 v0.3 **尚未完整通过**。
+但是 v0.4 **尚未达到最终验收**，不要进入牙齿、爪、Contact Concentration、复杂战斗 AI 或新阶段。
 
-唯一明确失败项是：
+当前最关键的问题：
 
-> 前进时支撑期足底滑移过大。当前支撑接触点平面位移代理约为胸腔位移的 2.513 倍，因此还不能证明 Leopard 的前进主要来自可信的步态牵引，而不是脚在地面上持续打滑。
+```
+v0.3 baseline:
+Stance Slip Ratio            = 1.208
+Sustained Stance Slip Ratio  = 0.936
 
-下一阶段只解决这个问题。
+v0.4 traction gait:
+Stance Slip Ratio            = 1.006
+Sustained Stance Slip Ratio  = 0.980
+```
+
+整体滑移下降了约 16.7%，这是进步。
+
+但：
+
+> 持续支撑期的滑移没有下降，反而从 0.936 上升到 0.980。
+
+所以报告中“已经不存在滑行主导”这一结论目前证据不足。
+
+本任务只做 v0.4 收口，不扩功能。
 
 ---
 
-## 1. 核心目标
+## 1. 先修正报告结论
 
-建立一个可测量、可解释的四足 locomotion traction 闭环：
+更新 `ANIMAL_ARENA_V04_TRACTION_REPORT.md`：
 
-```
-Brain 选择 approach / turn
-→ Motor 生成 stance / swing 协调
-→ Joint Actuator
-→ paw 与地面真实接触
-→ friction / normal force
-→ torso 位移
-```
+不能再写：
 
-目标不是让豹子跑得快，而是：
+> 是否仍有滑行主导：否
 
-> 身体前进主要来自足部周期性支撑和摆动，而不是四只脚在地面上持续滑行。
+应该如实写成：
+
+> 步态结构已从连续拖曳改为明确 stance/swing，整体 slip ratio 有下降，但持续支撑期滑移仍接近 torso travel，同样量级，尚未证明稳定支撑阶段已经摆脱滑移主导。
+
+不要为了“通过”修改措辞掩盖数据。
 
 ---
 
-## 2. 先建立可信的牵引测量
+## 2. 目标不是继续增加摩擦
 
-不要一上来继续调 friction 或 actuator。
+当前：
 
-先把 locomotion 测量做清楚。
+- floor friction = 1.4
+- paw friction = 1.6
 
-至少记录每只 paw：
+可以保留作为正常组。
 
-- 是否接触地面；
-- 接触持续时间；
-- stance / swing 状态；
-- 接触期间 paw 世界速度；
-- 接触期间 paw 相对地面切向速度；
-- 接触期间 torso 水平速度；
-- normal / tangential contact proxy（现有接口能拿多少就用多少）；
-- 每一步的落地点和离地点；
-- stride length；
-- duty factor；
-- slip distance。
+禁止通过继续把 friction 提到极高值来通过。
 
-定义一个通用、可重复的 traction 指标，例如：
+重点应放在：
 
-```
-stance slip ratio
-= stance 时 paw 相对地面滑移距离
-  / 同窗口 torso 前进距离
-```
-
-也可以设计更合理的指标，但必须解释清楚。
-
-不要只看“最后走了多远”。
+- touchdown 时 paw 切向速度；
+- stance 初期冲击；
+- stance hip sweep 速度；
+- knee / ankle 支撑协调；
+- paw 接触几何；
+- gait phase 与真实 contact 的同步；
+- 高频接触抖动。
 
 ---
 
-## 3. 区分 stance 与 swing
+## 3. 找出持续支撑滑移来源
 
-当前 gait 主要是相位正弦目标。
+给每条腿记录至少：
 
-下一步允许在 `LeopardMotorRuntime` 内建立更明确的 body-owned locomotion synergy：
+- touchdown 前 3 tick paw horizontal velocity；
+- touchdown 后 3 / 6 / 12 tick paw horizontal velocity；
+- stance 中段 paw horizontal velocity；
+- stance 末段 paw horizontal velocity；
+- torso horizontal velocity；
+- hip pitch velocity；
+- knee velocity；
+- ankle velocity；
+- contact impulse / force proxy；
+- stance duration；
+- material-point slip。
 
-- stance；
-- lift-off；
-- swing；
-- touchdown。
+按 episode 分解：
 
-状态切换必须主要依据：
+```
+touchdown transient slip
+early stance slip
+mid stance slip
+late stance slip
+```
 
-- gait phase；
-- paw contact sensor；
-- proprioception；
-- joint state。
+先确认滑移主要发生在哪一段，再改 controller。
 
-禁止依据：
-
-- 对手精确坐标；
-- torso 世界速度目标直接反推外力；
-- 时间脚本指定“第几秒抬哪条腿”。
-
-周期相位可以存在，但实际接触反馈必须能改变腿的状态。
+不要继续凭感觉调参数。
 
 ---
 
-## 4. stance 阶段
+## 4. 重点改 touchdown 与 stance
 
-支撑腿目标：
+优先调查：
 
-- 保持 paw 相对地面更稳定；
-- 通过肩/髋、膝、踝关节变化推动身体经过支撑点；
-- 不允许直接锁定 paw 世界位置；
-- 不允许给 torso 推力。
+### touchdown
+
+目标：
+
+- Paw 接地瞬间切向速度尽量接近地面；
+- 不要以前冲速度撞地后再靠摩擦刹停。
 
 允许：
 
-- 根据 proprioception 调整 joint target；
-- 根据 paw contact 调整支撑刚度/目标角；
-- 合理利用 passive compliance；
-- 通用摩擦参数。
+- 使用自身 local velocity；
+- 使用关节 proprioception；
+- swing 末段 pullback；
+- ankle 姿态调整。
+
+禁止：
+
+- 读世界坐标锁 foot；
+- 直接设置 paw velocity。
+
+### stance
+
+目标：
+
+- Paw 一旦进入稳定支撑，材料接触点应尽量保持在地面附近；
+- Torso 应通过关节运动相对支撑点向前通过。
+
+可以调整：
+
+- speedMatchedRate；
+- stance hip servo；
+- knee arc compensation；
+- ankle flattening；
+- stance stiffness / damping；
+- gait duty factor。
+
+但要一次只改少数参数，并保留对照数据。
 
 ---
 
-## 5. swing 阶段
+## 5. Traction 指标再补一项
 
-摆动腿应：
-
-- 明确抬离地面；
-- 向前摆；
-- 再次落地；
-- 避免全程擦地。
-
-必须通过真实关节控制做到。
-
-不要：
-
-- setTranslation paw；
-- collision disable 作弊穿地；
-- teleport foot；
-- kinematic foot placement。
-
----
-
-## 6. 不要用“无限摩擦”解决
-
-可以测试不同 friction，但不能把问题简化成：
+当前 ratio：
 
 ```
-friction = 100
+paw slip distance / torso travel
 ```
 
-然后宣布成功。
+保留。
 
-至少做：
+再增加一个直观指标：
 
-- 当前 friction；
-- 较低 friction；
-- 较高但合理 friction；
+```
+stance anchoring efficiency
+= max(0, 1 - pawSlip / torsoTravel)
+```
 
-三组对照。
+按：
 
-如果 gait 只有在极高摩擦下才能前进，说明 locomotion 仍有问题。
+- 每个 stance episode；
+- 每只 paw；
+- 全局加权；
 
----
+分别统计。
 
-## 7. 四足协调
+同时报告：
 
-第一版继续使用对角步态即可，不要求真实豹的完整步态库。
+- median；
+- p75；
+- p90；
 
-但必须看到：
-
-- 不同 paw 有清晰的 stance / swing 切换；
-- 不应该四足同时长期滑动；
-- 至少一对对角腿能形成可解释的推进周期；
-- 转向时左右侧 stance/stride 存在真实差异。
-
-允许动作慢、笨。
+避免少量异常 episode 把均值带偏。
 
 ---
 
-## 8. 转向也要验证牵引
+## 6. 明确收口门槛
 
-左转、右转不能只看 heading。
+不要用“有改善”作为通过标准。
 
-同时记录：
+在相同正常摩擦条件和同一 600 tick 直线任务下，至少满足：
 
-- 左右 paw stance time；
-- 左右 paw slip；
-- shoulder / hip yaw/roll；
-- torso heading。
+### 必须满足
 
-证明：
+- forward displacement > 0.8 m；
+- 四只 Paw 都有 >= 3 次有效 swing；
+- 每只 Paw swing clearance > 0.05 m；
+- stanceSlipRatio <= 0.80；
+- sustainedStanceSlipRatio <= 0.80；
+- 相比 phase-sine baseline 至少下降 20%；
+- min upright > 0.90；
+- spherical joint 不越出可信范围。
 
-> 转向来自左右支撑与关节姿态差异，而不是身体在地面上横着滑。
+### 最好达到
 
----
+- sustainedStanceSlipRatio <= 0.65。
 
-## 9. 受撞恢复保留回归
-
-v0.3 已经有两种受撞恢复。
-
-本阶段不要重点调恢复，但必须保证 gait 改动后：
-
-- 长时站立仍稳定；
-- 两种受撞恢复不明显退化；
-- spherical limit 不被突破到异常范围。
+如果做不到，不要硬宣布通过；报告真实瓶颈。
 
 ---
 
-## 10. 双豹 Arena 回归
+## 7. 低摩擦因果对照继续保留
 
-不要加新的攻击策略。
+至少：
 
-只确认 gait 改善没有破坏：
+- low = 0.35；
+- normal = 1.4；
+- high = 2.4。
 
-- 两个独立 Brain；
-- 自主接近；
-- 前肢接触；
-- head/jaw 接触；
+要求：
+
+```
+low friction:
+  slip 更高
+  traction 更差
+  displacement 不优于 normal
+```
+
+但高摩擦不需要最快。
+
+不要为了得到单调曲线去作弊。
+
+---
+
+## 8. 修正双豹接触测试写法
+
+当前 v0.4 的 F 测试把两只 Entity 的相同 Part ID 合并后，再根据 `partId.includes('jaw')` 决定读取哪只豹子，逻辑不够干净。
+
+改为明确遍历：
+
+```
+for each entityId in [leopard-a, leopard-b]
+  for each owned partId
+    readPartContacts(entityId, partId)
+```
+
+然后分别统计：
+
+- A touching B；
+- B touching A；
+- front limb；
+- head；
+- jaw。
+
+避免测试本身的实体归属含糊。
+
+---
+
+## 9. 测试不要依赖可变全局 baseline 顺序
+
+当前：
+
+```
+baseline.slipRatio
+```
+
+由测试 A 写入，再由测试 B 使用。
+
+改成：
+
+- `beforeAll` 生成 baseline；
+- 或在 B 中显式生成 baseline；
+- 或公共 helper 返回 baseline。
+
+不要让验收依赖测试执行顺序。
+
+---
+
+## 10. 回归必须继续通过
+
+不能为了降低滑移破坏：
+
+- 600 tick 长时站立；
+- 左转；
+- 右转；
+- 两种冲击恢复；
+- 双豹自主接近；
+- front limb contact；
+- head/jaw contact；
 - Energy；
 - Damage；
-- Observer。
-
-双豹接近速度可以变慢，但路径必须更可信。
+- spherical limits。
 
 ---
 
 ## 11. Anti-cheat
 
-重点扫描：
+继续检查：
 
-- torso direct force / impulse；
-- torso direct torque；
-- foot world-position lock；
+- direct torso force / impulse / torque；
+- paw world-position lock；
 - kinematic paw；
+- setTranslation / setRotation locomotion；
+- setLinvel / setAngvel locomotion；
 - teleport；
-- setLinvel / setAngvel 正常 locomotion；
-- friction 极端值；
-- fixture-specific physics branch；
-- scripted combat movement。
+- extreme friction；
+- direct opponent pose；
+- fixture-specific physics branch。
 
-出现这些则失败。
-
----
-
-## 12. 验收实验
-
-### A — Traction metric baseline
-
-记录 v0.3 当前 gait 的四足 slip / stance / stride 数据。
-
-### B — 改进后直线前进
-
-至少 600 tick。
-
-要求：
-
-- 明显净前进；
-- 四个 paw 都出现多次 stance/swing；
-- stance slip ratio 显著低于 baseline；
-- 不允许靠极端摩擦；
-- torso 姿态保持可用。
-
-### C — 低摩擦对照
-
-降低合理范围内 floor/paw friction。
-
-预期：
-
-- traction 变差；
-- slip 增加；
-- locomotion 下降。
-
-这证明摩擦真的参与因果链，而不是 controller 在“假走”。
-
-### D — 左右转向
-
-记录左右腿 stance/slip/stride 差异。
-
-要求：
-
-- heading 向正确方向变化；
-- 至少部分转向能由不对称 foot-ground interaction 解释。
-
-### E — 长时稳定回归
-
-600 tick 站立和两种撞击恢复继续通过。
-
-### F — 双豹自主接近
-
-保持独立 Brain。
-
-记录：
-
-- 最小距离；
-- 接触 tick；
-- gait slip 指标；
-- 前肢/头颌接触。
+任何一项进入正常 gait 路径即失败。
 
 ---
 
-## 13. 报告
+## 12. 报告
 
-创建：
+仍然更新：
 
 ```
 ANIMAL_ARENA_V04_TRACTION_REPORT.md
 ```
 
-必须回答：
+不要另开 v0.5 报告。
 
-1. traction/slip 指标如何定义；
-2. v0.3 baseline 是多少；
-3. 新 gait 如何区分 stance / swing；
-4. paw contact 如何参与 motor control；
-5. 改进后的直线前进数据；
-6. 低摩擦对照；
-7. 左右转向时左右脚的差异；
-8. 是否仍有滑行主导现象；
-9. 是否出现任何 locomotion shortcut；
-10. 下一步最大的一个真实阻塞是什么。
+最终必须清楚写：
 
----
-
-## 14. 不做
-
-本阶段不做：
-
-- Contact Concentration；
-- teeth / claw damage；
-- HP；
-- attackPower；
-- 神经网络；
-- 强化学习；
-- 新战斗状态机；
-- soft body；
-- UI 大改；
-- 高精模型。
-
-先把“走路”做可信。
+1. 原 v0.4 为什么还没通过；
+2. 滑移主要发生在 touchdown / early / mid / late stance 的哪部分；
+3. 修改了哪些 gait 参数/机制；
+4. baseline；
+5. 新 stanceSlipRatio；
+6. 新 sustainedStanceSlipRatio；
+7. anchoring efficiency 分布；
+8. 低/正常/高摩擦对照；
+9. 是否真正达到收口门槛；
+10. 如果仍未达到，真实原因是什么。
 
 ---
-
-## 15. 工作方式
-
-从：
-
-```
-codex/animal-arena-v0.3
-```
-
-继续开发。
-
-这是一个完整任务，不要让用户中途传话。
-
-完成后：
-
-1. 全量测试；
-2. `npm run typecheck`；
-3. `npm run build`；
-4. `npm run check:boundaries`；
-5. browser smoke；
-6. anti-cheat scan；
-7. 创建报告；
-8. commit；
-9. push；
-10. 停止等待独立审查。
 
 # 最终验收
 
-**Leopard 的前进和转向必须主要来自可测量的 stance/swing 四足步态与真实足地牵引，支撑期 paw 滑移显著下降，并且没有通过 torso 推进、足部世界锁定、极端摩擦或其他隐藏捷径制造移动结果。**
+**只有当正常摩擦下 Leopard 的持续支撑滑移明显低于躯干推进距离，并且 stance/swing、站立、转向、受撞恢复和双豹接触都继续成立时，Animal Arena v0.4 才算真正完成。**
+
+不要进入下一阶段，直到这个门槛真的通过。
