@@ -53,7 +53,7 @@ const limbMaterial: Material = {
 const contactMaterial: Material = {
   id: 'leopard-contact',
   density: 800,
-  friction: 1.15,
+  friction: 1.6,
   restitution: 0.02,
   yieldImpulseNs: 9,
   toughnessImpulseNs: 45,

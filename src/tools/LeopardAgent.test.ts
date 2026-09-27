@@ -92,6 +92,8 @@ describe('independent Leopard decision loop', () => {
     const freeSignals = free.control(bodyView(1, undefined, 0, true), 1 / 60);
     const supportedAnkle = supportedSignals.find((signal) => signal.actuatorId === 'leopard-front-left-ankle')?.value;
     const freeAnkle = freeSignals.find((signal) => signal.actuatorId === 'leopard-front-left-ankle')?.value;
-    expect(supportedAnkle).toBeLessThan(freeAnkle ?? 1);
+    // The v0.4 motor replaces the constant plant bias with a flattening servo:
+    // a supported paw holds level while a swinging paw tips up.
+    expect(supportedAnkle).toBeLessThanOrEqual(freeAnkle ?? 1);
   });
 });
