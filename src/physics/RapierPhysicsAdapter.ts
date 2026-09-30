@@ -56,6 +56,10 @@ interface MomentumSnapshot {
 }
 
 interface AppliedWrench { force: Vector3; torque: Vector3 }
+type StepForceInput =
+  | { readonly kind: 'force'; readonly force: Vector3 }
+  | { readonly kind: 'point-force'; readonly force: Vector3; readonly point: Vector3 }
+  | { readonly kind: 'torque'; readonly torque: Vector3 };
 
 function add(a: Vector3, b: Vector3): Vector3 { return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }; }
 function scale(v: Vector3, n: number): Vector3 { return { x: v.x * n, y: v.y * n, z: v.z * n }; }
@@ -297,6 +301,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
   private readonly partRuntimeReferences = new Map<BodyHandle, PartRuntimeReference>();
   private readonly colliderRuntimeReferences = new Map<number, PartRuntimeReference>();
   private readonly stepScopedForceBodies = new Set<RAPIER.RigidBody>();
+  private readonly stepForceInputs = new Map<RAPIER.RigidBody, StepForceInput[]>();
   private readonly appliedWrenches = new Map<RAPIER.RigidBody, AppliedWrench>();
   private readonly staticWorldBoxHandles = new Set<BodyHandle>();
   private nextHandle = 1;
@@ -543,6 +548,31 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     this.appliedWrenches.set(body, current);
   }
 
+  private rememberStepForce(body: RAPIER.RigidBody, input: StepForceInput): void {
+    const inputs = this.stepForceInputs.get(body) ?? [];
+    inputs.push(input);
+    this.stepForceInputs.set(body, inputs);
+  }
+
+  private applyStepForces(reapply: boolean): void {
+    for (const [body, inputs] of this.stepForceInputs) {
+      for (const input of inputs) {
+        if (input.kind === 'force') {
+          if (reapply) body.addForce(input.force, true);
+          this.recordWrench(body, input.force, { x: 0, y: 0, z: 0 });
+        } else if (input.kind === 'point-force') {
+          if (reapply) body.addForceAtPoint(input.force, input.point, true);
+          const center = body.worldCom();
+          const arm = { x: input.point.x - center.x, y: input.point.y - center.y, z: input.point.z - center.z };
+          this.recordWrench(body, input.force, cross(arm, input.force));
+        } else {
+          if (reapply) body.addTorque(input.torque, true);
+          this.recordWrench(body, { x: 0, y: 0, z: 0 }, input.torque);
+        }
+      }
+    }
+  }
+
   removeBody(body: PhysicsBody): void {
     const runtimeBody = this.runtimeBodies.get(body);
     if (!runtimeBody) throw new Error('Unknown physics body');
@@ -586,6 +616,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       if (collider) this.colliderRuntimeReferences.delete(collider.handle);
       this.partRuntimeReferences.delete(handle);
       this.stepScopedForceBodies.delete(part);
+      this.stepForceInputs.delete(part);
       this.appliedWrenches.delete(part);
       runtimeBody.partColliders.delete(partId);
       runtimeBody.latestPartImpulses.delete(partId);
@@ -634,6 +665,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     const body = this.bodies.get(handle);
     if (!body) throw new Error(`Unknown body handle: ${handle}`);
     body.addForce(force, true);
+    this.rememberStepForce(body, { kind: 'force', force: { ...force } });
     this.recordWrench(body, force, { x: 0, y: 0, z: 0 });
     this.stepScopedForceBodies.add(body);
   }
@@ -645,6 +677,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     const body = this.bodies.get(handle);
     if (!body) throw new Error(`Unknown body handle: ${handle}`);
     body.addForceAtPoint(force, point, true);
+    this.rememberStepForce(body, { kind: 'point-force', force: { ...force }, point: { ...point } });
     const center = body.worldCom();
     const arm = { x: point.x - center.x, y: point.y - center.y, z: point.z - center.z };
     this.recordWrench(body, force, cross(arm, force));
@@ -785,6 +818,8 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       const toPoint = worldPoint(connection.to, connection.toAnchor);
       connection.from.addForceAtPoint(fromForce, fromPoint, true);
       connection.to.addForceAtPoint(toForce, toPoint, true);
+      this.rememberStepForce(connection.from, { kind: 'point-force', force: fromForce, point: fromPoint });
+      this.rememberStepForce(connection.to, { kind: 'point-force', force: toForce, point: toPoint });
       const fromCom = { ...connection.from.worldCom() };
       const toCom = { ...connection.to.worldCom() };
       this.recordWrench(connection.from, fromForce, cross(add(fromPoint, scale(fromCom, -1)), fromForce));
@@ -792,6 +827,8 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     } else {
       connection.from.addTorque(negate(effort), true);
       connection.to.addTorque(effort, true);
+      this.rememberStepForce(connection.from, { kind: 'torque', torque: negate(effort) });
+      this.rememberStepForce(connection.to, { kind: 'torque', torque: effort });
       connection.actuatorTorqueWorld = add(connection.actuatorTorqueWorld ?? { x: 0, y: 0, z: 0 }, effort);
       this.recordWrench(connection.from, { x: 0, y: 0, z: 0 }, negate(effort));
       this.recordWrench(connection.to, { x: 0, y: 0, z: 0 }, effort);
@@ -967,54 +1004,121 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       for (const partId of runtimeBody.latestPartContactLoads.keys()) runtimeBody.latestPartContactLoads.set(partId, { impulseNs: 0, forceN: 0 });
       for (const contacts of runtimeBody.latestContacts.values()) contacts.length = 0;
     }
-    this.world.timestep = seconds;
-    // Passive supports are ordinary equal-and-opposite torques applied through
-    // the connected bodies for this step. They never modify pose or velocity
-    // directly and are included in the applied-wrench load estimate below.
+    // Resolve declared passive springs from their physical stiffness/inertia.
+    // Bodies without stiff supports keep the ordinary outer-step integration.
+    // Keep k * J^-1 * dt^2 <= 0.5 for this explicit, velocity-limited damper.
+    let maximumSpringFrequencySquared = 0;
     for (const runtimeBody of this.activeRuntimeBodies) {
-      this.applyPassiveAngular(runtimeBody, seconds);
-      this.applyAngularLimits(runtimeBody, seconds);
+      for (const connection of runtimeBody.connections.values()) {
+        if (connection.broken) continue;
+        for (const support of connection.passiveAngular ?? []) {
+          const axis = rotate(checkedUnitVector(support.axis, 'passive angular support'), connection.from.rotation());
+          const inverseInertia = inverseInertiaAlong(connection.from, axis) + inverseInertiaAlong(connection.to, axis);
+          maximumSpringFrequencySquared = Math.max(maximumSpringFrequencySquared, support.stiffnessNmPerRad * inverseInertia);
+        }
+      }
     }
-    this.world.step(this.eventQueue);
-    for (const runtimeBody of this.activeRuntimeBodies) {
-      for (const [partId, collider] of runtimeBody.partColliders) {
-        const contacts = runtimeBody.latestContacts.get(partId)!;
-        this.world.contactPairsWith(collider, (other) => {
-          const otherReference = this.colliderRuntimeReferences.get(other.handle);
-          this.world.contactPair(collider, other, (manifold) => {
-            for (let i = 0; i < manifold.numSolverContacts(); i += 1) {
-              const point = manifold.solverContactPoint(i);
-              if (!point) continue;
-              contacts.push({ point: { x: point.x, y: point.y, z: point.z },
-                impulseNs: Math.max(0, manifold.contactImpulse(i)),
-                ...(otherReference ? { otherEntityId: otherReference.runtimeBody.entityId,
-                  otherPartId: otherReference.partId } : {}) });
-            }
+    const substepCount = Math.max(1, Math.ceil(seconds * Math.sqrt(maximumSpringFrequencySquared / 0.5)));
+    const substepSeconds = seconds / substepCount;
+    const wrenchImpulse = new Map<RAPIER.RigidBody, AppliedWrench>();
+
+    for (let substep = 0; substep < substepCount; substep += 1) {
+      // Keep continuous inputs active for the complete outer tick by replaying
+      // them after each internal reset; direct impulses remain one-shot.
+      this.appliedWrenches.clear();
+      this.applyStepForces(substep > 0);
+
+      this.world.timestep = substepSeconds;
+      // Passive supports and stops are recomputed from the current physical
+      // state before every substep and remain ordinary applied torques.
+      for (const runtimeBody of this.activeRuntimeBodies) {
+        this.applyPassiveAngular(runtimeBody, substepSeconds);
+        this.applyAngularLimits(runtimeBody, substepSeconds);
+      }
+      for (const [body, wrench] of this.appliedWrenches) {
+        const integral = wrenchImpulse.get(body) ?? { force: { x: 0, y: 0, z: 0 }, torque: { x: 0, y: 0, z: 0 } };
+        integral.force = add(integral.force, scale(wrench.force, substepSeconds));
+        integral.torque = add(integral.torque, scale(wrench.torque, substepSeconds));
+        wrenchImpulse.set(body, integral);
+      }
+
+      this.world.step(this.eventQueue);
+
+      // Contact force events report a mean force for this solver step. Integrate
+      // each substep's impulse; convert it to the outer-tick mean below.
+      this.eventQueue.drainContactForceEvents((event) => {
+        const impulse = event.totalForceMagnitude() * substepSeconds;
+        if (!Number.isFinite(impulse) || impulse <= 0) return;
+        const references = [
+          this.colliderRuntimeReferences.get(event.collider1()),
+          this.colliderRuntimeReferences.get(event.collider2()),
+        ];
+        for (const reference of references) {
+          if (!reference) continue;
+          const { runtimeBody, partId } = reference;
+          const previous = runtimeBody.latestPartContactLoads.get(partId)!;
+          runtimeBody.latestPartContactLoads.set(partId, {
+            impulseNs: previous.impulseNs + impulse,
+            forceN: 0,
           });
-        });
+          runtimeBody.latestPartImpulses.set(
+            partId,
+            (runtimeBody.latestPartImpulses.get(partId) ?? 0) + impulse,
+          );
+        }
+      });
+
+      if (substep === substepCount - 1) {
+        // Contact geometry/point impulses are snapshots from the final solver
+        // substep. Earlier substep points are not merged into one synthetic set.
+        for (const runtimeBody of this.activeRuntimeBodies) {
+          for (const [partId, collider] of runtimeBody.partColliders) {
+            const contacts = runtimeBody.latestContacts.get(partId)!;
+            this.world.contactPairsWith(collider, (other) => {
+              const otherReference = this.colliderRuntimeReferences.get(other.handle);
+              this.world.contactPair(collider, other, (manifold) => {
+                for (let i = 0; i < manifold.numSolverContacts(); i += 1) {
+                  const point = manifold.solverContactPoint(i);
+                  if (!point) continue;
+                  contacts.push({ point: { x: point.x, y: point.y, z: point.z },
+                    impulseNs: Math.max(0, manifold.contactImpulse(i)),
+                    ...(otherReference ? { otherEntityId: otherReference.runtimeBody.entityId,
+                      otherPartId: otherReference.partId } : {}) });
+                }
+              });
+            });
+          }
+        }
+      }
+
+      if (substep < substepCount - 1) {
+        for (const body of this.stepScopedForceBodies) {
+          body.resetForces(false);
+          body.resetTorques(false);
+        }
       }
     }
-    this.eventQueue.drainContactForceEvents((event) => {
-      const impulse = event.totalForceMagnitude() * seconds;
-      if (!Number.isFinite(impulse) || impulse <= 0) return;
-      const references = [
-        this.colliderRuntimeReferences.get(event.collider1()),
-        this.colliderRuntimeReferences.get(event.collider2()),
-      ];
-      for (const reference of references) {
-        if (!reference) continue;
-        const { runtimeBody, partId } = reference;
-        const previous = runtimeBody.latestPartContactLoads.get(partId)!;
+
+    this.appliedWrenches.clear();
+    for (const [body, integral] of wrenchImpulse) {
+      this.appliedWrenches.set(body, {
+        force: scale(integral.force, 1 / seconds),
+        torque: scale(integral.torque, 1 / seconds),
+      });
+    }
+    for (const runtimeBody of this.activeRuntimeBodies) {
+      for (const [partId, load] of runtimeBody.latestPartContactLoads) {
         runtimeBody.latestPartContactLoads.set(partId, {
-          impulseNs: previous.impulseNs + impulse,
-          forceN: previous.forceN + event.totalForceMagnitude(),
+          impulseNs: load.impulseNs,
+          forceN: load.impulseNs / seconds,
         });
-        runtimeBody.latestPartImpulses.set(
-          partId,
-          (runtimeBody.latestPartImpulses.get(partId) ?? 0) + impulse,
-        );
       }
-    });
+      for (const connection of runtimeBody.connections.values()) {
+        if (connection.supportTorqueWorld) {
+          connection.supportTorqueWorld = scale(connection.supportTorqueWorld, 1 / substepCount);
+        }
+      }
+    }
 
     // Rapier 0.20 exposes no public joint reaction API. Estimate endpoint
     // reactions from momentum change minus gravity and forces/torques explicitly
@@ -1103,6 +1207,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       body.resetTorques(false);
     }
     this.stepScopedForceBodies.clear();
+    this.stepForceInputs.clear();
     this.appliedWrenches.clear();
     for (const runtimeBody of this.activeRuntimeBodies) {
       for (const connection of runtimeBody.connections.values()) {

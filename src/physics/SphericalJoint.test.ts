@@ -44,6 +44,36 @@ const ballConnection = (
   ...(angularLimits ? { angularLimits } : {}),
 });
 
+const lightSupport: Entity = {
+  id: 'light-passive-support',
+  blueprint: {
+    id: 'light-passive-support',
+    materials: [material],
+    parts: [
+      {
+        id: 'lower', materialId: material.id,
+        geometry: { kind: 'box', halfExtents: { x: 0.12, y: 0.16, z: 0.1 } },
+        pose: { position: { x: 0, y: 4, z: 0 }, rotation: identity }, mass: 0.5,
+      },
+      {
+        id: 'paw', materialId: material.id,
+        geometry: { kind: 'box', halfExtents: { x: 0.28, y: 0.07, z: 0.14 } },
+        pose: { position: { x: 0, y: 4.23, z: 0 }, rotation: identity }, mass: 0.28,
+      },
+    ],
+    connections: [{
+      id: 'support', kind: 'revolute', fromPartId: 'lower', toPartId: 'paw',
+      fromAnchor: { x: 0, y: 0.16, z: 0 }, toAnchor: { x: 0, y: -0.07, z: 0 },
+      axis: { x: 0, y: 0, z: 1 },
+      passiveAngular: [{
+        axis: { x: 0, y: 0, z: 1 }, restAngle: 0,
+        stiffnessNmPerRad: 45, dampingNmsPerRad: 10,
+      }],
+    }],
+  },
+};
+
+
 describe('generic spherical connections', () => {
   it('uses the public Rapier 0.20 spherical descriptor and observes its runtime generic joint', async () => {
     await RAPIER.init();
@@ -106,6 +136,52 @@ describe('generic spherical connections', () => {
     expect(finalAngle).toBeLessThan(initialAngle * 0.35);
     expect(finalVelocity).toBeLessThan(initialVelocity);
     expect(peakPassiveLoadNm).toBeGreaterThan(0);
+  });
+
+  it('dissipates motion in a light unactuated revolute support at 60 Hz', async () => {
+    const physics = await RapierPhysicsAdapter.create();
+    const body = physics.createBody(lightSupport);
+    physics.applyTorqueImpulse(body.partHandles.get('paw')!, { x: 0, y: 0, z: 0.025 });
+
+    const step = 1 / 60;
+    physics.step(step);
+    const initialVelocity = Math.abs(physics.readJointVelocity(body, 'support', { x: 0, y: 0, z: 1 }));
+    expect(initialVelocity).toBeGreaterThan(1e-3);
+    let peakPassiveLoadNm = 0;
+    let peakAngularSpeed = initialVelocity;
+    for (let tick = 0; tick < 120; tick += 1) {
+      physics.step(step);
+      const angle = physics.readJointPosition(body, 'support', { x: 0, y: 0, z: 1 });
+      const velocity = physics.readJointVelocity(body, 'support', { x: 0, y: 0, z: 1 });
+      expect(Number.isFinite(angle)).toBe(true);
+      expect(Number.isFinite(velocity)).toBe(true);
+      peakAngularSpeed = Math.max(peakAngularSpeed, Math.abs(velocity));
+      peakPassiveLoadNm = Math.max(peakPassiveLoadNm, physics.readConnectionLoad(body, 'support').torqueNm);
+    }
+
+    const finalVelocity = Math.abs(physics.readJointVelocity(body, 'support', { x: 0, y: 0, z: 1 }));
+    console.info('[light passive support]', { initialVelocity, peakAngularSpeed, finalVelocity });
+    expect(peakAngularSpeed).toBeLessThan(initialVelocity * 2);
+    expect(finalVelocity).toBeLessThan(initialVelocity * 0.1);
+    expect(peakPassiveLoadNm).toBeGreaterThan(0);
+  });
+
+  it('replays continuous forces through support substeps and applies impulses only once', async () => {
+    const physics = await RapierPhysicsAdapter.create();
+    const body = physics.createBody(lightSupport);
+    const lower = body.partHandles.get('lower')!;
+    const paw = body.partHandles.get('paw')!;
+    // Both Parts start at vx=0.2 and receive ax=60 for one 1/60 s world tick.
+    for (const [handle, mass] of [[lower, 0.5], [paw, 0.28]] as const) {
+      physics.applyImpulse(handle, { x: mass * 0.2, y: 0, z: 0 });
+      physics.applyForce(handle, { x: mass * 60, y: 0, z: 0 });
+    }
+    physics.step(1 / 60);
+    expect(physics.readLinearVelocity(lower).x).toBeCloseTo(1.2, 4);
+    expect(physics.readLinearVelocity(paw).x).toBeCloseTo(1.2, 4);
+    physics.step(1 / 60);
+    expect(physics.readLinearVelocity(lower).x).toBeCloseTo(1.2, 4);
+    expect(physics.readLinearVelocity(paw).x).toBeCloseTo(1.2, 4);
   });
 
   it.each([

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { validateBlueprint } from '../core/model';
 import { RapierPhysicsAdapter } from '../physics/RapierPhysicsAdapter';
+import { WorldRuntime } from '../simulation/WorldRuntime';
+import { createPassiveObjectBlueprint } from './worldFixtures';
 import { createLeopardBlueprint } from './LeopardBlueprint';
 
 const expectedPartIds = [
@@ -37,7 +39,8 @@ describe('LeopardBlueprint', () => {
       'leopard-head-contact', 'leopard-jaw-contact', 'leopard-head-range',
     ]));
     expect(sensors.find((sensor) => sensor.id === 'leopard-head-range')).toMatchObject({
-      kind: 'range', forward: { x: 1, y: 0, z: 0 },
+      kind: 'range', forward: { x: 1, y: -0.15, z: 0 },
+      localPose: { position: { x: 0.24, y: -0.14, z: 0 } },
     });
     expect(blueprint.parts.filter((part) => part.pose.position.y - (
       part.geometry.kind === 'box' ? part.geometry.halfExtents.y : 0
@@ -79,7 +82,24 @@ describe('LeopardBlueprint', () => {
     }
     expect(reverse.connections.map((connection) => connection.id)).toEqual(forward.connections.map((connection) => connection.id));
     expect(reverse.actuators?.map((actuator) => actuator.id)).toEqual(forward.actuators?.map((actuator) => actuator.id));
-    expect(reverse.sensors?.find((sensor) => sensor.id === 'leopard-head-range')?.forward).toEqual({ x: 1, y: 0, z: 0 });
+    expect(reverse.sensors?.find((sensor) => sensor.id === 'leopard-head-range')?.forward).toEqual(
+      forward.sensors?.find((sensor) => sensor.id === 'leopard-head-range')?.forward);
+  });
+
+  it('sees low objects on both sides through the actual muzzle-mounted anonymous rays', async () => {
+    for (const facing of [1, -1] as const) for (const side of [-1, 1]) {
+      const physics = await RapierPhysicsAdapter.create();
+      const world = new WorldRuntime(physics, { surfaces: [{ id: 'floor',
+        position: { x: 0, y: -0.15, z: 0 }, halfExtents: { x: 12, y: 0.15, z: 12 }, friction: 1.4 }] });
+      world.spawn({ id: 'observer', blueprint: createLeopardBlueprint({ facing }) });
+      world.spawn({ id: 'object', blueprint: createPassiveObjectBlueprint({
+        halfExtents: { x: 0.35, y: 0.5, z: 0.35 }, mass: 80,
+      }) }, { origin: { x: 2.5*facing, y: 0, z: 1.2*side*facing } });
+      world.stepOnce();
+      const ranges = world.readSensorRuntime('observer')!.readAgentView().perceptions
+        .filter(item => item.channel === 'range');
+      expect(ranges.some(item => item.values[2]*side > 0.5 && item.values[3] < 2)).toBe(true);
+    }
   });
 
   it('maps both orientations through the generic Rapier body adapter', async () => {

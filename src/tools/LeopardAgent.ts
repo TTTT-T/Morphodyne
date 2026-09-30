@@ -1,6 +1,7 @@
 import { createControlSignal, type ControlSignal } from '../core/actuation';
 import type { Decision, DecisionPolicy, DecisionPolicyInput, SkillName } from '../core/brainPolicy';
 import type { AgentPerceptionView } from '../core/sensing';
+import { LEOPARD_LEG_MECHANICS } from './LeopardBlueprint';
 import { BrainRuntime, type BrainSnapshot, type SkillIntent } from '../simulation/BrainRuntime';
 
 const clamp = (value: number): number => Math.max(-1, Math.min(1, value));
@@ -124,12 +125,29 @@ function jointCommand(signals: ControlSignal[], frame: MotorFrame, actuatorId: s
     clamp(gain * (target - state[coordinate]) - velocityGain * state[coordinate + 1])));
 }
 
+/** Two-link body geometry; targets remain joint efforts through ordinary actuators. */
+function legAngles(x: number, down: number): { hip: number; knee: number; ankle: number } {
+  const { upperLength: upper, lowerLength: lower } = LEOPARD_LEG_MECHANICS;
+  const cosine = Math.max(-1, Math.min(1, (x*x + down*down - upper*upper - lower*lower)/(2*upper*lower)));
+  const knee = -Math.acos(cosine);
+  const hip = Math.atan2(x, down) - Math.atan2(lower*Math.sin(knee), upper+lower*Math.cos(knee));
+  return { hip, knee, ankle: -hip-knee };
+}
+
+function tractionJointCommand(signals: ControlSignal[], frame: MotorFrame, actuatorId: string,
+  connectionId: string, target: number, supportRatio: number, gain: number, damping: number): void {
+  const state = frame.joints.get(connectionId);
+  if (!state) return;
+  signals.push(createControlSignal(actuatorId,
+    clamp(gain*(target-state[0]) + supportRatio*state[0] - damping*state[1])));
+}
+
 /** Spine, neck and jaw targets are shared by both gaits; they never touch torso translation. */
 function torsoCommands(signals: ControlSignal[], frame: MotorFrame, yawDamping = 0,
   turnScale = 0.65): void {
   jointCommand(signals, frame, 'leopard-spine-pitch', 'leopard-spine-joint', -frame.pitch * 0.12, 1.8);
   jointCommand(signals, frame, 'leopard-spine-yaw', 'leopard-spine-joint',
-    -frame.turn * turnScale - yawDamping * 0.3, 3, 4);
+    -frame.turn * turnScale + yawDamping * 0.3, 3, 4);
   jointCommand(signals, frame, 'leopard-neck-pitch', 'leopard-neck-joint',
     frame.intent.skill === 'interact' ? 0.25 : 0.02, 1.8);
   jointCommand(signals, frame, 'leopard-jaw-close', 'leopard-jaw-joint',
@@ -196,41 +214,29 @@ class PhaseSineGait {
 interface LegCycleState {
   mode: LeopardLegGaitMode;
   modeSeconds: number;
-  wasReaching: boolean;
+  swingWindowUsed: boolean;
+  /** Touchdown is only valid after this swing actually lost sensed contact. */
+  hasLifted: boolean;
+  swingAirborneSeconds: number;
+  liftOffSeconds: number;
   /** Hip pitch measured at the current mode's entry; stance retracts away from it. */
   anchorHipPitch: number;
-  /** Knee angle at stance entry; the stance leg holds it like a rigid strut. */
+  /** Knee angle captured with the hip so each mode starts at its measured foot position. */
   anchorKneePitch: number;
-  /** Integrated stance sweep in radians, matched to measured body speed. */
+  /** Integrated foot retraction in metres, matched to measured body speed. */
   sweepPosition: number;
   /** Consecutive airborne time inside stance, debouncing 1-tick contact flicker. */
   airborneSeconds: number;
-  /** Slew-limited stance hip effort, kept in the leg state to survive mode changes. */
-  lastHipEffort: number;
-  /** Low-pass filtered hip rate; raw per-tick rates destabilise the velocity servo. */
-  filteredHipRate: number;
   stanceEpisodes: number;
   swings: number;
 }
 
 const TRACTION = {
-  cycleHz: 0.7,
+  cycleHz: 0.5,
   /** Phase span of one diagonal group's swing window. */
-  swingSpan: 1.6,
-  /** Hip retraction rate while planted; positive pitch sweeps the paw backward. */
-  retractRate: 0.55,
-  stanceHipMin: -0.6,
-  stanceHipMax: 0.6,
-  touchdownPitch: { front: -0.32, hind: -0.24 } as const,
-  swingKneeFlex: 0.25,
-  stanceKnee: -0.12,
-  stanceHipGain: 2.6,
-  stanceVelocityGain: 0.55,
-  swingHipGain: 2.6,
-  swingKneeGain: 2.8,
-  swingVelocityGain: 0.35,
+  swingSpan: 3.0,
   /** A swing accepts touchdown only after its lift apex, so lift-off can clear the paw. */
-  touchdownProgress: 0.45,
+  touchdownProgress: 0.85,
   minSwingSeconds: 0.05,
   minStanceSeconds: 0.12,
   seekMaxSeconds: 0.9,
@@ -242,9 +248,9 @@ export type TractionTuning = Partial<{ [K in keyof typeof TRACTION]: (typeof TRA
 
 /**
  * Contact-gated diagonal gait. Swing legs flex and advance; stance legs retract the
- * hip so the planted paw stays near its ground point while the torso passes over.
- * Lift-off is postponed until the opposite diagonal pair reports contact, an early
- * touchdown starts stance immediately, and a stance leg that loses ground seeks it
+ * leg so the planted paw stays near its ground point while the torso passes over.
+ * Lift-off is postponed until the opposite diagonal pair reports contact, a touchdown after measured lift
+ * starts stance, and a stance leg that loses ground seeks it
  * again. No torso force, paw world pose, or scripted timeline is used.
  */
 class TractionGait {
@@ -256,9 +262,8 @@ class TractionGait {
   private readonly params: Readonly<typeof TRACTION>;
   private readonly legs = new Map<LegPrefix, LegCycleState>(
     LEG_PARTS.map(({ prefix }) => [prefix, {
-      mode: 'hold', modeSeconds: 0, anchorHipPitch: 0, stanceEpisodes: 0, swings: 0,
-      wasReaching: false, anchorKneePitch: 0, sweepPosition: 0, airborneSeconds: 0,
-      lastHipEffort: 0, filteredHipRate: 0,
+      mode: 'hold', modeSeconds: 0, swingWindowUsed: false, anchorHipPitch: 0, stanceEpisodes: 0, swings: 0,
+      hasLifted: false, swingAirborneSeconds: 0, liftOffSeconds: 0, anchorKneePitch: 0, sweepPosition: 0, airborneSeconds: 0,
     } as LegCycleState]),
   );
 
@@ -272,11 +277,11 @@ class TractionGait {
     return (this.phase + ((end === 'front') === (side === 'left') ? 0 : Math.PI)) % (Math.PI * 2) < this.params.swingSpan;
   }
 
-  /** True when any leg of the opposite diagonal pair currently senses contact. */
+  /** Both legs of the opposite diagonal pair must sense contact before lift-off. */
   private oppositePairGrounded(frame: MotorFrame, prefix: LegPrefix): boolean {
     const end = prefix.includes('front') ? 'front' : 'hind';
     const side = prefix.includes('left') ? 'left' : 'right';
-    return LEG_PARTS.filter((other) => other.end !== end && other.side !== side)
+    return LEG_PARTS.filter((other) => (other.end === end) !== (other.side === side))
       .every((other) => frame.contact(other.prefix));
   }
 
@@ -295,9 +300,15 @@ class TractionGait {
       this.running = frame.moving;
       if (frame.moving) for (const [prefix, state] of this.legs) {
         const startSwing = this.inSwingWindow(prefix);
+        state.hasLifted = false;
+        state.swingAirborneSeconds = 0;
         state.mode = startSwing ? 'swing' : 'stance';
         state.modeSeconds = 0;
         state.anchorHipPitch = frame.joints.get(prefix + '-hip-joint')?.[0] ?? 0;
+        state.anchorKneePitch = frame.joints.get(prefix + '-knee-joint')?.[0] ?? 0;
+        state.sweepPosition = 0;
+        state.airborneSeconds = 0;
+        state.swingWindowUsed = startSwing;
       }
     }
     // Turn intent is damped at the body so sensor jitter cannot yank the spine.
@@ -316,7 +327,10 @@ class TractionGait {
       const state = this.legs.get(prefix)!;
       const footContact = frame.contact(prefix);
       const kneeAngle = frame.joints.get(prefix + '-knee-joint')?.[0] ?? 0;
+      const torsoPitch = frame.pitch + (end === 'hind' ? frame.joints.get('leopard-spine-joint')?.[0] ?? 0 : 0);
       const hipPitch = frame.joints.get(prefix + '-hip-joint')?.[0] ?? 0;
+      const previousMode = state.mode;
+      if (!this.inSwingWindow(prefix)) state.swingWindowUsed = false;
       state.modeSeconds += seconds;
       const enterStance = (): void => {
         state.mode = 'stance';
@@ -328,16 +342,9 @@ class TractionGait {
         state.stanceEpisodes += 1;
       };
 
-      // Near an anonymous return the forelimbs stop stepping and reach toward it,
-      // letting the hind legs push the body into contact. The Brain is unchanged.
+      // Near-contact intent adjusts the limb orientation while the same gait
+      // continues carrying the front body; both forelegs must not stop supporting it.
       const reaching = frame.intent.skill === 'interact' && end === 'front';
-      if (state.wasReaching && !reaching) {
-        // Leaving a reach: re-ground from the current posture instead of a stale anchor.
-        state.mode = 'seek';
-        state.modeSeconds = 0;
-        state.anchorHipPitch = hipPitch;
-      }
-      state.wasReaching = reaching;
       const swingWindowSeconds = this.params.swingSpan / (Math.PI * 2 * this.params.cycleHz);
       if (righting) {
         state.mode = 'hold';
@@ -347,10 +354,13 @@ class TractionGait {
         state.mode = this.inSwingWindow(prefix) ? 'swing' : 'stance';
         state.modeSeconds = 0;
         state.anchorHipPitch = hipPitch;
+        state.anchorKneePitch = kneeAngle;
+        state.sweepPosition = 0;
+        state.airborneSeconds = 0;
       } else if (state.mode === 'stance') {
         state.airborneSeconds = footContact ? 0 : state.airborneSeconds + seconds;
         if (this.inSwingWindow(prefix)) {
-          if (this.oppositePairGrounded(frame, prefix) && state.modeSeconds >= this.params.minStanceSeconds) {
+          if (!state.swingWindowUsed && this.oppositePairGrounded(frame, prefix) && state.modeSeconds >= this.params.minStanceSeconds) {
             state.mode = 'swing';
             state.modeSeconds = 0;
             state.anchorHipPitch = hipPitch;
@@ -363,7 +373,13 @@ class TractionGait {
           state.anchorHipPitch = hipPitch;
         }
       } else if (state.mode === 'swing') {
-        if (footContact
+        state.swingAirborneSeconds = footContact ? 0 : state.swingAirborneSeconds + seconds;
+        if (!state.hasLifted && state.swingAirborneSeconds >= this.params.minSwingSeconds) {
+          state.hasLifted = true;
+          state.liftOffSeconds = state.modeSeconds;
+        }
+        if (state.hasLifted && footContact
+          && state.modeSeconds >= this.params.minSwingSeconds
           && state.modeSeconds / swingWindowSeconds >= this.params.touchdownProgress) {
           enterStance();
         } else if (!this.inSwingWindow(prefix) && state.modeSeconds >= swingWindowSeconds + 0.12) {
@@ -382,15 +398,21 @@ class TractionGait {
         }
       }
 
+      if (state.mode === 'swing' && previousMode !== 'swing') {
+        state.swingWindowUsed = true;
+        state.anchorKneePitch = kneeAngle;
+        state.hasLifted = false;
+        state.swingAirborneSeconds = 0;
+      }
+
       const turn = this.smoothTurn;
-      const strideScale = frame.intent.skill === 'turn' ? sideSign * turn : 1 + sideSign * turn * 0.35;
+      const strideScale = frame.intent.skill === 'turn' ? sideSign * turn : 1 + sideSign * turn * 0.8;
       const approachGentle = frame.intent.skill === 'interact' ? 0.55 : 1;
-      const speedMatchedRate = Math.max(0.18, Math.min(1.05,
-        Math.max(0, this.measuredSpeed) / 0.72 + 0.05)) * approachGentle;
+      const speedMatchedRate = Math.max(0.14, Math.min(0.24, this.measuredSpeed+0.02)) * approachGentle;
       const postureHip = (end === 'front' ? -frame.pitch : frame.pitch) * 0.15 + sideSign * frame.roll * 0.18;
-      const rollTarget = (state.mode === 'hold' ? 1.2 * frame.roll : 0)
+      const rollTarget = (state.mode === 'hold' ? 1.2 * frame.roll : -sideSign*0.04)
         + (reaching ? frame.targetSide * sideSign * 0.2 : 0) - turn * 0.12;
-      const yawTarget = -turn * (end === 'front' ? 0.45 : -0.3) - yawRate * 0.25
+      const yawTarget = -turn * (end === 'front' ? 0.6 : -0.3) + yawRate * 0.25
         - lateralSpeed * 0.8 * (end === 'front' ? 1 : -0.5)
         + (reaching ? frame.targetSide * sideSign * 0.14 : 0);
 
@@ -404,93 +426,54 @@ class TractionGait {
           sideSign * 0.45 * rock - frame.roll * 0.8, 2.6, 2);
         jointCommand(signals, frame, prefix + '-hip-yaw', prefix + '-hip-joint', 0, 2.5, 4);
         jointCommand(signals, frame, prefix + '-knee', prefix + '-knee-joint', 0.35, 2.6);
-      } else if (reaching) {
-        // Near-contact forelimb behaviour is shared with the v0.3 body: brace or lift
-        // toward the anonymous return instead of stepping. Hind legs keep walking.
-        const lifting = !footContact && kneeAngle < 0.35;
-        const bracing = !lifting;
-        const reachBias = frame.targetSide * sideSign * 0.18;
-        const hipTarget = (bracing ? 1.1 + Math.max(0, 0.45 - frame.targetDistance) * 0.12 + reachBias : 0.28)
-          + postureHip;
-        const kneeTarget = bracing ? 0.9 + Math.max(0, 0.45 - frame.targetDistance) * 0.08 : 0.62;
-        jointCommand(signals, frame, prefix + '-hip', prefix + '-hip-joint', hipTarget, 0.8, 0, 0.6);
-        jointCommand(signals, frame, prefix + '-hip-roll', prefix + '-hip-joint', rollTarget, 1.4, 2, 0.6);
-        jointCommand(signals, frame, prefix + '-hip-yaw', prefix + '-hip-joint', yawTarget, 1.4, 4, 0.6);
-        jointCommand(signals, frame, prefix + '-knee', prefix + '-knee-joint', kneeTarget, 0.8, 0, 0.6);
       } else if (state.mode === 'hold') {
         jointCommand(signals, frame, prefix + '-hip', prefix + '-hip-joint', postureHip, 3.5);
         jointCommand(signals, frame, prefix + '-hip-roll', prefix + '-hip-joint', rollTarget, 2.5, 2);
         jointCommand(signals, frame, prefix + '-hip-yaw', prefix + '-hip-joint', yawTarget, 2.5, 4);
         jointCommand(signals, frame, prefix + '-knee', prefix + '-knee-joint', 0, 3.5);
-      } else if (state.mode === 'stance') {
-        state.sweepPosition += speedMatchedRate * strideScale * seconds;
-        const hipTarget = Math.max(this.params.stanceHipMin,
-          Math.min(this.params.stanceHipMax,
-            state.anchorHipPitch + state.sweepPosition)) + postureHip;
-        const hipState = frame.joints.get(prefix + '-hip-joint');
-        if (hipState && Number.isFinite(hipState[1])) {
-          // Torque-limited velocity servo: follow the retraction sweep without
-          // demanding more ground force than the pad can carry, so the paw sticks.
-          const desiredRate = speedMatchedRate * strideScale;
-          state.filteredHipRate += (hipState[1] - state.filteredHipRate) * 0.15;
-          const rawEffort = Math.max(-0.45, Math.min(0.45, 0.7 * (hipTarget - hipState[0])
-            + 0.3 * (desiredRate - state.filteredHipRate)));
-          // Slew-limit the effort so impacts cannot spike entity-wide power into
-          // the shared energy brownout that stutters every leg at once.
-          state.lastHipEffort += Math.max(-0.08, Math.min(0.08, rawEffort - state.lastHipEffort));
-          signals.push(createControlSignal(prefix + '-hip', clamp(state.lastHipEffort)));
-        }
-        // Strong roll damping keeps the planted sole flat; rocking between its
-        // long edges is what carries the pad along with the torso.
-        jointCommand(signals, frame, prefix + '-hip-roll', prefix + '-hip-joint', rollTarget, 2.8, 2, 1.1);
-        jointCommand(signals, frame, prefix + '-hip-yaw', prefix + '-hip-joint', yawTarget, 2.5, 4, 0.4);
-        // The hip sweep arcs the paw upward at its ends; stance knee extension
-        // follows the measured arc so the sole stays loaded instead of rocking
-        // on toe and heel corners.
-        const arcCompensation = 0.55 * (1 - Math.cos(hipPitch)) + 0.3;
-        jointCommand(signals, frame, prefix + '-knee', prefix + '-knee-joint',
-          state.anchorKneePitch - arcCompensation, 2.0, 0, 0.3);
-      } else if (state.mode === 'swing') {
-        const progress = Math.min(1, state.modeSeconds / swingWindowSeconds);
-        const touchdown = this.params.touchdownPitch[end] - sideSign * turn * 0.12;
-        const lift = Math.min(1, progress / 0.28);
-        const extend = Math.min(1, Math.max(0, (progress - 0.62) / 0.32));
-        const flexed = -0.12 + (this.params.swingKneeFlex + 0.12) * lift;
-        const kneeTarget = flexed * (1 - extend) + -0.05 * extend;
-        // Late swing reverses from protraction to retraction so the pad lands
-        // with near-zero ground speed instead of skidding at body speed.
-        const pullback = speedMatchedRate * 0.2
-          * Math.min(1, Math.max(0, (progress - 0.85) / 0.15));
-        const hipTarget = state.anchorHipPitch
-          + (touchdown - state.anchorHipPitch) * progress + pullback;
-        jointCommand(signals, frame, prefix + '-hip', prefix + '-hip-joint', hipTarget,
-          this.params.swingHipGain, 0, this.params.swingVelocityGain);
-        jointCommand(signals, frame, prefix + '-hip-roll', prefix + '-hip-joint', rollTarget, 2.0, 2, this.params.swingVelocityGain);
-        jointCommand(signals, frame, prefix + '-hip-yaw', prefix + '-hip-joint', yawTarget, 2.0, 4, this.params.swingVelocityGain);
-        jointCommand(signals, frame, prefix + '-knee', prefix + '-knee-joint', kneeTarget,
-          this.params.swingKneeGain, 0, this.params.swingVelocityGain);
       } else {
-        // Seek: a stance leg lost ground or a swing overran its window. Reach the
-        // paw down and forward until real contact returns.
-        jointCommand(signals, frame, prefix + '-hip', prefix + '-hip-joint',
-          this.params.touchdownPitch[end] - 0.05 + postureHip, 3.6, 0, 0.4);
-        jointCommand(signals, frame, prefix + '-hip-roll', prefix + '-hip-joint', rollTarget, 2.5, 2, 0.4);
-        jointCommand(signals, frame, prefix + '-hip-yaw', prefix + '-hip-joint', yawTarget, 2.5, 4, 0.4);
-        jointCommand(signals, frame, prefix + '-knee', prefix + '-knee-joint',
-          state.anchorKneePitch, 2.6, 0, 0.4);
+        const swingSeconds = swingWindowSeconds;
+        let x: number;
+        let down: number;
+        if (state.mode === 'stance') {
+          state.sweepPosition += speedMatchedRate * strideScale * seconds;
+          x = LEOPARD_LEG_MECHANICS.upperLength * Math.sin(state.anchorHipPitch)
+            + LEOPARD_LEG_MECHANICS.lowerLength * Math.sin(state.anchorHipPitch + state.anchorKneePitch) - state.sweepPosition;
+          x = Math.max(-0.15, Math.min(0.16, x));
+          down = 0.70;
+        } else if (state.mode === 'swing') {
+          const progress = Math.min(1, state.modeSeconds / swingSeconds);
+          const startX = LEOPARD_LEG_MECHANICS.upperLength * Math.sin(state.anchorHipPitch)
+            + LEOPARD_LEG_MECHANICS.lowerLength * Math.sin(state.anchorHipPitch + state.anchorKneePitch);
+          const advance = state.hasLifted
+            ? Math.min(1, Math.max(0, (state.modeSeconds-state.liftOffSeconds)/(swingSeconds*0.3))) : 0;
+          const touchdownX = Math.max(-0.16, Math.min(0.16, 0.12*strideScale));
+          x = startX + (touchdownX-startX)*advance
+            - Math.max(0, progress-0.8)*swingSeconds*Math.max(0,this.measuredSpeed);
+          down = 0.70 - 0.14*Math.max(0, Math.min(1, progress/0.25, (1-progress)/0.25));
+        } else {
+          x = 0.12;
+          down = 0.70 + Math.min(0.025, state.modeSeconds*0.03);
+        }
+        const targets = legAngles(x*Math.cos(torsoPitch)-down*Math.sin(torsoPitch),
+          down*Math.cos(torsoPitch)+x*Math.sin(torsoPitch));
+        tractionJointCommand(signals, frame, prefix+'-hip', prefix+'-hip-joint', targets.hip+sideSign*frame.roll*0.18,
+          LEOPARD_LEG_MECHANICS.hipStiffness / LEOPARD_LEG_MECHANICS.hipMaxTorque, 4, 0.12);
+        tractionJointCommand(signals, frame, prefix+'-knee', prefix+'-knee-joint', targets.knee,
+          LEOPARD_LEG_MECHANICS.kneeStiffness / LEOPARD_LEG_MECHANICS.kneeMaxTorque, 4, 0.12);
+        jointCommand(signals, frame, prefix+'-hip-roll', prefix+'-hip-joint', rollTarget, 2.8, 2, 0.4);
+        jointCommand(signals, frame, prefix+'-hip-yaw', prefix+'-hip-joint', yawTarget, 2.5, 4, 0.4);
       }
 
       if (frame.joints.has(prefix + '-paw')) {
         const ankleState = frame.joints.get(prefix + '-paw');
         const ankleAngle = ankleState?.[0] ?? 0;
         const ankleVelocity = ankleState?.[1] ?? 0;
-        if (state.mode === 'swing' || state.mode === 'seek') {
-          signals.push(createControlSignal(prefix + '-ankle',
-            clamp(0.15 + sideSign * this.smoothTurn * 0.08)));
+        if (state.mode === 'swing' || state.mode === 'seek' || state.mode === 'stance') {
+          const target = Math.max(-0.9, Math.min(0.9, -hipPitch-kneeAngle-torsoPitch));
+          tractionJointCommand(signals, frame, prefix+'-ankle', prefix+'-paw', target, LEOPARD_LEG_MECHANICS.ankleStiffness / LEOPARD_LEG_MECHANICS.ankleMaxTorque, 4, 0.06);
         } else {
-          // Flatten the paw under load so the pad plants on its sole, not an edge.
-          signals.push(createControlSignal(prefix + '-ankle',
-            clamp(1.2 * (0 - ankleAngle) - 0.2 * ankleVelocity)));
+          signals.push(createControlSignal(prefix+'-ankle', clamp(-1.2*ankleAngle-0.2*ankleVelocity)));
         }
       }
     }

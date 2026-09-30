@@ -629,6 +629,19 @@ Requirements:
 
 Agents control inputs, not outcomes. Physics has final authority.
 
+The Rapier adapter chooses internal substeps from declared passive spring
+stiffness and the connected bodies' relative inverse inertia, keeping
+`stiffness × inverse inertia × substep² ≤ 0.5`. Structures without stiff
+passive supports keep ordinary outer-step integration. The adapter recomputes
+passive angular supports and stops at each substep to avoid numerical energy
+growth on light articulated links. Continuous actuator
+and external forces remain active for the full world tick; impulses are applied
+once. Contact force loads integrate all substep impulses and report the mean
+force over the world tick. Contact point geometry and per-point impulses are
+snapshots of the last internal substep, not whole-tick impulse totals. Sensors,
+Agent decisions, Energy allocation, and structural damage still use the world
+fixed step.
+
 Do not assume cross-platform bitwise determinism from the default Rapier build. Future replay/branching should use:
 
 **World Snapshot + Event Stream + Seeded Agent RNG.**

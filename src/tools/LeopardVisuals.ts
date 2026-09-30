@@ -169,10 +169,10 @@ function legVisual(side: LegSide, segment: LegSegment, hind: boolean): PartVisua
   }
 
   return { pieces: [
-    box(v(0.18, 0.10, 0.16), v(0.035, -0.035, 0), palette.bodyDark),
-    box(v(0.13, 0.018, 0.11), v(0.045, -0.087, 0), palette.pawPad),
-    box(v(0.050, 0.016, 0.022), v(0.105, -0.090, outward * 0.045), palette.claw),
-    box(v(0.050, 0.016, 0.022), v(0.105, -0.090, outward * 0.005), palette.claw),
+    box(v(0.18, 0.10, 0.16), v(0.035, -0.015, 0), palette.bodyDark),
+    box(v(0.13, 0.018, 0.11), v(0.045, -0.060, 0), palette.pawPad),
+    box(v(0.050, 0.016, 0.022), v(0.105, -0.060, outward * 0.045), palette.claw),
+    box(v(0.050, 0.016, 0.022), v(0.105, -0.060, outward * 0.005), palette.claw),
   ] };
 }
 

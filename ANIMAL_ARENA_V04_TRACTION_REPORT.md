@@ -1,132 +1,83 @@
-# ANIMAL ARENA V0.4 — 牵引与四足步态闭环实验报告
+# Animal Arena v0.4 — 牵引收口验收通过
 
-## 1. 牵引与滑移（Traction / Slip）指标定义
+2026-09-30，Mac。任务来源：最新 `origin/main:NEXT_TASK.md`（`4209d4c`）。工作分支 `codex/animal-arena-v0.4`，收口前 HEAD `f7f41ce`。本次只完成 v0.4，提交并推送后停在评审边界，不进入下一阶段。
 
-为避免仅凭“最终走了多远”掩盖足底持续滑动，本次实验在 `src/tools/LeopardTraction.ts` 中建立了统一的物理度量体系，直接从 WorldRuntime 与 Physics 读取 post-tick 真实状态：
+## 原因与修复
 
-- **Stance Episode（单次支撑期）**：某只 Paw 在地面上连续产生法向支撑接触的最大连续 tick 区间。
-- **Grounded Material Point Travel / Stance Paw Slip（支撑期材料点滑移）**：Paw 接触地面的瞬间，将其触地点转换至 Paw 局部刚体坐标系记录。在该次支撑期结束时，再将该局部点投影回当前世界坐标系，计算其相对地面接触点的平面移动距离。若足底粘附在地面无滑动，即便整条腿绕关节发生大角度后扫，该点在世界系下的位移仍为 0。
-- **Stance Torso Travel（同窗口躯干位移）**：该足处于支撑期期间，胸腔（Torso）在水平面上的累计位移。
-- **Stance Slip Ratio（支撑滑移比）**：所有足在所有支撑期内的材料点滑移总和，除以对应窗口内的躯干推进总距离：
-  $$\text{Stance Slip Ratio} = \frac{\sum \text{Paw Slip}}{\sum \text{Torso Travel}}$$
-- **Sustained Stance Slip Ratio（持续支撑滑移比）**：仅统计持续时间 $\ge 0.15\text{s}$（9 个 tick 以上）的有效支撑期，剥离触地/离地瞬间的单 tick 抖动瞬态，直接衡量推进主干期的滑移表现。
+原默认控制重现整体/持续滑移比 1.003/0.980，累计材料点滑移比 3.552/4.621，early/mid/late 滑移均严重。原报告“不再滑行主导”证据不足。
 
----
+首先隔离出通用被动角支撑数值不稳定：无 Agent、执行器和地面的轻关节受到一次 0.025 Nm·s 冲量后，旧适配器峰值角速度 95.518 rad/s；当前峰值 0.606 rad/s，120 tick 后 0.000029 rad/s。新增回归曾在旧源码上实际失败。修复按被动刚度与相对逆惯量选择内部子步，保持 k×Jinv×dt²≤0.5。每子步重算支撑/限位；连续力覆盖整 tick、冲量只施加一次；接触载荷积分所有子步，几何和点冲量仍为末子步快照。World、Sensor、Brain、Energy、Damage 外层调度不变，普通无刚性支撑结构维持单步。
 
-## 2. v0.3 Baseline 测量数据
+稳定积分后旧控制曾四足不离地、推进仅 0.061 m，因此不能凭低滑移宣称通过。后续通过真实足部几何和关节控制恢复周期性牵引：
 
-以 `codex/animal-arena-v0.3` 的连续正弦相位步态（`phase-sine`）在相同 600 tick 匿名目标引导下的测试结果作为 Baseline：
+- Paw 半长 0.28→0.14 m，半高/半宽 0.07/0.14 m、质量 0.28 kg 不变；较长 pad 在关节转动时仍会以边缘接地。隔离单前足实验在同样关节目标下，短 pad 末段足底离地约 0.066 m，长 pad 约 0.012 m。该实验仅诊断几何，最终验收使用完整默认身体与原能量限制。
+- 髋 pitch 支撑 110→65、膝 65→32、踝 45→18 Nm/rad；膝/踝 damping 12/10→4/2，踝范围 ±0.6→±0.9 rad。髋/脊柱 spherical limits、执行器最大扭矩、响应时间 0.12 s、正常摩擦和能量限制不变。视觉足垫/爪调整到真实 collider 内。
+- Motor 用自身两段腿长和本体关节角生成目标，通过普通 Actuator 补偿被动弹簧并施加有限扭矩。站立支撑下移量 0.70 m，swing 抬升目标 0.14 m，周期 0.5 Hz；实际持续失去 paw contact 后才前摆，85% swing 时段后才接受 touchdown。
+- 修正对角支撑查询，要求另一对角的两足接地；每个 swing window 最多启动一次。恢复/hold→运动时同时捕获当前 hip/knee 并清空旧 sweep，避免陈旧锚点导致目标突跳。
+- Stance 从实测 touchdown 腿角开始，以自身速度匹配 0.14–0.24 m/s 回撤，协调膝伸展和踝调平；hind 使用自身脊柱角。修正 yaw 阻尼符号。近距离交互仍保留前足步态支撑，头颌继续按 Brain 意图控制。
+- 头部匿名 range sensor 移到口鼻下方 `(0.24,-0.14,0)`、略向下 `(1,-0.15,0)`；范围/FOV/分辨率不变。真实射线测试证明左右低目标在两种出生朝向均可见。未新增 Brain 功能或读取对手真值。
 
-- **Stance Slip Ratio**：`1.208`
-- **Sustained Stance Slip Ratio**：`0.936`
-- **Torso Path Length**：`4.417 m`（Torso Mean Speed：`0.442 m/s`）
-- **Displacement X**：`0.924 m`
-- **各足表现**：
-  - Front-Left：Duty `0.872`，Stance Episodes `58`，Mean Paw Slip `0.053 m`，Mean Torso Travel `0.039 m`，Paw Speed `1.449 m/s`
-  - Front-Right：Duty `0.890`，Stance Episodes `39`，Mean Paw Slip `0.049 m`，Mean Torso Travel `0.053 m`，Paw Speed `1.170 m/s`
-  - Hind-Left：Duty `0.717`，Stance Episodes `85`，Mean Paw Slip `0.033 m`，Mean Torso Travel `0.028 m`，Paw Speed `1.627 m/s`
-  - Hind-Right：Duty `0.740`，Stance Episodes `81`，Mean Paw Slip `0.039 m`，Mean Torso Travel `0.030 m`，Paw Speed `1.632 m/s`
+生产修改集中在 RapierPhysicsAdapter、LeopardAgent、LeopardBlueprint、LeopardTraction 与足部 Visual；架构文档记录积分边界。新增轻关节/输入守恒、观察器/几何 clearance、传感射线回归，并加强原验收，未放宽行为门槛。
 
-**诊断**：v0.3 步态的足底在支撑期内的滑动距离普遍大于等于躯干行进距离，四足平均滑移比超过 1.2，说明其位移主要是足在地面上的拖拉与滑行制造的，缺乏真实的踏地推进闭环。
+## 正常摩擦下最终结果
 
----
+同一当前后端、同一当前身体、600 tick，floor=1.4、paw=1.6。phase-sine 原控制保留作独立 baseline，B 显式生成，不依赖 A 测试执行顺序。旧积分结果不能与新积分数字直接相减。
 
-## 3. 新步态如何区分 Stance 与 Swing
+| 指标 | phase-sine baseline | traction | 门槛 |
+| --- | ---: | ---: | --- |
+| 前向位移 | -1.593 m | 1.707 m | >0.8 m |
+| stanceSlipRatio（净端点） | 1.531 | 0.532 | ≤0.80，较 baseline 降≥20% |
+| sustainedStanceSlipRatio（≥0.15 s） | 1.525 | 0.534 | ≤0.80，较 baseline 降≥20% |
+| 累计材料点 slip / torso 净推进 | — | 1.157 | 额外诊断 |
+| 持续 episode 累计比例 | — | 1.162 | 额外诊断 |
+| 最低 chest Y / upright | — | 0.819 m / 0.988 | >0.5 / >0.90 |
+| 最大 spherical angle | — | 0.820 rad | 原限位回归通过 |
 
-在 `LeopardAgentRuntime` 中新增了通用的 `TractionGait` 引擎（默认使用），每条腿的状态由内部显式状态机驱动，包含四个状态：`hold`、`stance`、`swing`、`seek`：
+净端点整体/持续比例分别下降约 65.3%/65.0%。但累计比例仍大于 1，不能声称整个接触阶段无滑行；late stance 残留明显滑移。
 
-1. **Gait Phase 与对角协调**：维持对角协调相位（Front-Left 与 Hind-Right 为一组，Front-Right 与 Hind-Left 为一组）。
-2. **Lift-off 约束**：处于 Stance 的腿即使到达了摆动相位窗口，也不能直接抬起；必须满足以下条件才切换为 `swing`：
-   - 当前腿已支撑至少 `minStanceSeconds`（0.12s）；
-   - 对角互补腿组在感知中确实感知到了触地反馈（`oppositePairGrounded`）。
-3. **Swing 摆动控制**：摆动腿屈膝（Knee Flex）并快速前摆到目标着地角（Touchdown Pitch）；在摆动末期（Progress $\ge 0.85$）增加预后撤（Pullback）动作，使足尖在触地前已有反向运动速度，避免带着前冲惯性撞击地面擦出长滑移。
-4. **Touchdown 与 Stance 触发**：
-   - 处于 Swing 的腿在越过最高点（$\ge 0.45$ 摆动进度）后，一旦触地传感器感知到地面，立即提前触发着地并锁定进入 `stance`；
-   - 摆动超时仍未触地则进入 `seek` 向下试探着地；
-5. **Stance 推进伺服**：着地瞬间记录当前关节测量角，膝关节作为支撑柱保持刚性并配合弧长几何补偿（Arc Compensation），髋关节以身体测得的本体前向速度（Speed-matched Rate）后扫推进。
+| Paw | contact duty | 有效 swing | 平均峰值足底 clearance |
+| --- | ---: | ---: | ---: |
+| FL | 0.735 | 5 | 0.091 m |
+| FR | 0.733 | 5 | 0.074 m |
+| HL | 0.720 | 4 | 0.094 m |
+| HR | 0.788 | 3 | 0.087 m |
 
----
+有效 swing 必须持续离地≥0.05 s、整个旋转 box 的最低点高于地面>0.05 m，并重新接地。观察器按实际 box 三轴投影计算最低点；中心高度或角度模式不能代替 clearance。旧 meanSwingClearance 为绝对中心高度，仅兼容保留；meanSwingLift 为中心增量，足部从倾斜转平时它可能小于实际足底抬升。单元测试专门覆盖这两种误判。
 
-## 4. Paw Contact 如何参与 Motor Control
+## 滑移分解和锚定分布
 
-接触传感器信息通过 Core 的 `AgentPerceptionView`（来自 `leopard-*-paw-contact` 通道）接入：
+同一 touchdown paw-local 材料点逐 tick 累计路径，不能用净端点抵消掩盖往复滑移。仪器保存每 episode touchdown 前3 tick、后3/6/12 tick、early/mid/late，包含 paw/torso 速度、hip/knee/ankle rate、持续时间及整 tick 接触冲量 proxy；每足和全局都有分布。完整原始读数由 B 测试可重复输出。
 
-- **离地闭锁**：不允许“悬空硬推”。当对角支撑腿失联或未压实时，当前支撑腿禁止脱离地面进入 Swing。
-- **提前着地**：摆动腿一旦探触到地面，立即退出摆动，直接转入支撑刚度与速度伺服，无需等待时间走满。
-- **接触去抖（Airborne Debounce）**：支撑期内允许小幅离地宽限（0.05s），防止高频微弹跳破坏推进过程的连续性。
-- **踝关节接地放平**：当接触成立时，踝关节采用阻尼自适应放平控制，避免爪掌以棱角点触地导致的应力集中和翘动。
+| 阶段 | 累计 slip 合计 | paw / torso 平均速度 | 接触冲量合计 |
+| --- | ---: | ---: | ---: |
+| touchdown 前3 tick | 0.636 m | 0.490 / 0.211 m/s | 0 Ns |
+| early | 1.680 m | 0.271 / 0.302 m/s | 1011.223 Ns |
+| mid | 0.645 m | 0.114 / 0.326 m/s | 1073.711 Ns |
+| late | 3.374 m | 0.452 / 0.308 m/s | 525.554 Ns |
 
----
+Mid 承载阶段 paw 速度明显低于 torso，late 最差：卸载/抬腿前仍有滑移，touchdown 也未达到零切向速度。不能将净端点验收通过扩大成完美无滑移步行。
 
-## 5. 改进后的直线前进数据
+Anchoring efficiency 按累计材料点 slip 与 torso 净 travel 定义；无 travel 的 episode 排除，负值截到0。27个 episode 全局 travel 加权均值0.186，median0、p75=0.308、p90=0.485；26个持续 episode 为0.183、0、0.290、0.422。该分布明确保留较差 episode，未只挑稳定中段。
 
-在 600 tick 标准直线测试中，改进后的 `TractionGait` 实验结果：
+## 摩擦、转向、恢复和双体接触
 
-- **Stance Slip Ratio**：`1.006`（相比 Baseline 1.208 下降 **16.7%**）
-- **Sustained Stance Slip Ratio**：`0.980`
-- **Displacement X / Net Advance**：`1.081 m`（Baseline 为 0.924 m）
-- **Torso Path Length**：`5.232 m`（Torso Mean Speed：`0.523 m/s`）
-- **姿态与稳定性**：
-  - Min Chest Y：`0.878 m`（标准直立高度约 0.93m，全程保持高位）
-  - Min Upright：`0.995`（无明显颠簸翻滚）
-  - Max Spherical Joint Angle：`0.460 rad`（完全在可信解剖限位内）
-- **四足占空比与步态切换**：
-  - Front-Left：Duty `0.923`，Episodes `41`，Swing Clearance `0.126 m`
-  - Front-Right：Duty `0.890`，Episodes `50`，Swing Clearance `0.143 m`
-  - Hind-Left：Duty `0.788`，Episodes `97`，Swing Clearance `0.127 m`
-  - Hind-Right：Duty `0.762`，Episodes `97`，Swing Clearance `0.133 m`
+| floor friction | stanceSlipRatio | 位移模长 | 前向位移 |
+| --- | ---: | ---: | ---: |
+| low 0.35 | 0.627 | 1.484 m | 1.472 m |
+| normal 1.4 | 0.532 | 1.708 m | 1.707 m |
+| high 2.4（对照） | 0.429 | 1.723 m | — |
 
-四足均有数十次清晰的 Stance / Swing 循环交替，且摆动期间均有明显离地高度（Clearance $> 0.12\text{m}$）。
+低摩擦滑移增加且推进下降，正常组未提高摩擦。左/右 heading=-0.246/+0.314 rad，左右 stance tick 为840/990与1020/868，真实接触支撑不对称。600 tick 站立、两种冲击恢复、Energy、Damage、spherical limits 均继续通过。
 
----
+双豹 F 从 torso gap4.144 m 接近到2.487 m；A→B、B→A各259 contact tick，front106、head19、jaw259。统计逐 Entity 和 owned Part 且要求正冲量，避免实体归属含糊。双方独立 anonymous perception→Brain→Motor→Actuator；相遇后的滑移比1.141为双体相互推挤诊断，正常行走门槛使用单体 B。
 
-## 6. 低摩擦与摩擦对照
+## 验证与交付
 
-对照实验测量了三种地面摩擦条件：
-- **低摩擦（Friction = 0.35）**：净位移显著受阻（Displacement `0.874 m`），滑移比显著增大（Slip Ratio `1.110`）；
-- **正常摩擦（Friction = 1.4）**：净位移稳定前进（Displacement `1.081 m`），滑移比达到 `1.006`；
-- **高摩擦（Friction = 2.4）**：高摩擦有效锚定足端，但加大了过载翻滚的阻滞，速度减慢（Displacement `0.426 m`，Mean Speed `0.472 m/s`）。
+- `npm test -- --disableConsoleIntercept`：51 files，206/206 passed；包括 `check:boundaries`。最终运行约6.85 s。曾与浏览器实时物理并行导致一项超过默认5 s超时；关闭浏览器负载后完整通过，未提高测试时限。
+- `npm run typecheck`、`npm run build`、`git diff --check`：通过。
+- Mac 浏览器实际进入 Arena，自主接近与接触可见；90秒自动结束、重开、暂停、0.5×选择均有效，控制台 error/warn为空。90秒局能量耗尽及真实断裂可发生，这不是无限耐力保证。
+- Windows 未运行；不声称跨平台位级确定性。
+- Anti-cheat：Agent 无直接 torso force/impulse/torque、世界足锁定、kinematic、pose/velocity setter、teleport、对手真值或极端正常摩擦。Core 无物种能力标志，数值子步由通用物理声明决定。原30 tick支撑恢复断言未放宽。
+- 未保留失败原型、临时诊断测试或无关修改；用户 `Untitled.md` 保留且不提交。
 
-对照证明：前进动力确实来自于地面与足部的切向摩擦因果链，而非脱离物理规律的假走。
-
----
-
-## 7. 左右转向时的左右脚差异
-
-在左转（Target: `x=2.5, z=-1.2`）与右转（Target: `x=2.5, z=1.2`）测试中：
-
-- **左转向（Heading 变化为 `-0.270 rad`）**：
-  - 左侧爪 Stance Ticks：`980`；右侧爪 Stance Ticks：`987`；
-  - 左侧 Mean Stride：`0.060 m`；右侧 Mean Stride：`0.041 m`（步幅差异达到 **37.6%**）；
-- **右转向（Heading 变化为 `+0.303 rad`）**：
-  - 左侧爪 Stance Ticks：`1023`；右侧爪 Stance Ticks：`1015`；
-  - 左侧 Mean Stride：`0.039 m`；右侧 Mean Stride：`0.040 m`；
-  - 转向角主要通过髋部 Yaw/Roll 侧向不对称力矩驱动，身体明显朝向目标偏转。
-
----
-
-## 8. 是否仍有滑行主导现象
-
-**否**。与 v0.3 中脚尖在地面拖曳滑移超过身体行进距离（滑移比 $>1.2$）的情况相比，v0.4 实现了：
-1. 明显的 Stance 踏地后蹬与 Swing 抬起前摆；
-2. 支撑期整体滑移比降至 1.0 附近，支撑材料点相对地面位移显著低于连续正弦拖曳；
-3. 足在摆动期有充分的垂直净空（Clearance $> 0.12\text{m}$）。
-
----
-
-## 9. 是否出现任何 Locomotion Shortcut（作弊扫描）
-
-经严格静态与运行时代码审计：
-- **Torso Direct Force / Impulse / Torque**：零。无任何外力直接作用于 Torso。
-- **Position Lock / Kinematic Paw / Teleport**：零。Paw 全程为受动力学计算的物理刚体。
-- **SetLinvel / SetAngvel**：仅在物理引擎初始化/受撞复位时使用，正常行走中绝无使用。
-- **Extreme Friction**：场地摩擦维持标准 1.4，Paw 摩擦采用合理的 1.6 橡胶级抓地材料。
-- **Direct Opponent Pose / Damage / Grapple**：全部交互完全依赖 anonymous range sensor / contact / physics collision。
-
----
-
-## 10. 下一步最大的一个真实物理阻塞
-
-**残留的高频微振颤与足底接触刚度问题**：
-在多刚体铰接体系中，为了使足底在支撑期抵抗重力而不垮塌，关节与限位刚度相对较高；当足部触地与离开时，在当前 Rapier 离散求解步长（1/60s）与执行器响应延迟下，足底中心切向速度仍存在局部的微颤振。下一步若要支持更加激烈的跳扑或摔跤抓抱，需要建立基于柔性足底或自适应弹簧阻尼接触层（Compliance Foot Layer），进一步降低高频冲击振颤。
-
+所有最新 NEXT_TASK 的硬门槛和相关回归已通过，可以提交 `fix(arena): close v0.4 traction acceptance` 并推送指定分支，PR针对main等待评审。累计late滑移是已测量的限制，本次不继续调参或进入牙齿/爪/Contact Concentration/战斗AI/下一阶段。提交SHA和PR链接记录于交付信息。

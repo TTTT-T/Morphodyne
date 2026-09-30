@@ -15,6 +15,13 @@ export interface LeopardBlueprintOptions {
   readonly facing?: 1 | -1;
 }
 
+/** Body-owned mechanical values shared with the motor's two-link model. */
+export const LEOPARD_LEG_MECHANICS = {
+  upperLength: 0.4, lowerLength: 0.32,
+  hipStiffness: 65, kneeStiffness: 32, ankleStiffness: 18,
+  hipMaxTorque: 100, kneeMaxTorque: 65, ankleMaxTorque: 25,
+} as const;
+
 const IDENTITY_ROTATION = { x: 0, y: 0, z: 0, w: 1 } as const;
 const REVERSED_ROTATION = { x: 0, y: 1, z: 0, w: 0 } as const;
 
@@ -319,7 +326,7 @@ export function createLeopardBlueprint(options: LeopardBlueprintOptions = {}): B
       makePart(facing, legPartId(leg, 'lower'), limbMaterial.id,
         { kind: 'box', halfExtents: vector(0.12, 0.16, 0.1) }, vector(leg.x, 0.3, leg.z), 0.5),
       makePart(facing, legPartId(leg, 'paw'), contactMaterial.id,
-        { kind: 'box', halfExtents: vector(0.28, 0.07, 0.14) }, vector(leg.x + pawForwardOffset, 0.07, leg.z), 0.28),
+        { kind: 'box', halfExtents: vector(0.14, 0.07, 0.14) }, vector(leg.x + pawForwardOffset, 0.07, leg.z), 0.28),
     );
   }
 
@@ -359,27 +366,27 @@ export function createLeopardBlueprint(options: LeopardBlueprintOptions = {}): B
           leg.z,
         ),
         vector(0, 0.2, 0), limbConnectionLoad,
-        ballSupport(110, 420, 80), hipAngularLimits),
+        ballSupport(LEOPARD_LEG_MECHANICS.hipStiffness, 420, 80), hipAngularLimits),
     revolute(legJointConnectionId(leg, 'knee'), upper, lower,
         vector(0, -0.2, 0), vector(0, 0.16, 0), vector(0, 0, 1), limbConnectionLoad,
-        { min: -1.35, max: 0.75 }, pitchSupport(65, 12)),
+        { min: -1.35, max: 0.75 }, pitchSupport(LEOPARD_LEG_MECHANICS.kneeStiffness, 4)),
       revolute(legPawConnectionId(leg), lower, paw,
         vector(0, -0.16, 0), vector(-pawForwardOffset, 0.07, 0), vector(0, 0, 1), pawConnectionLoad,
-        { min: -0.6, max: 0.6 }, pitchSupport(45, 10)),
+        { min: -0.9, max: 0.9 }, pitchSupport(LEOPARD_LEG_MECHANICS.ankleStiffness, 2)),
     );
   }
 
   const actuators: JointActuator[] = [];
   for (const leg of legs) {
     actuators.push(
-      { ...jointActuator(legActuatorId(leg, 'hip'), legJointConnectionId(leg, 'hip'), 100),
+      { ...jointActuator(legActuatorId(leg, 'hip'), legJointConnectionId(leg, 'hip'), LEOPARD_LEG_MECHANICS.hipMaxTorque),
         axis: vector(0, 0, 1) },
       { ...jointActuator(`leopard-${leg.region}-${leg.side}-hip-roll`, legJointConnectionId(leg, 'hip'), 24),
         axis: vector(1, 0, 0) },
       { ...jointActuator(`leopard-${leg.region}-${leg.side}-hip-yaw`, legJointConnectionId(leg, 'hip'), 60),
         axis: vector(0, 1, 0) },
-      jointActuator(legActuatorId(leg, 'knee'), legJointConnectionId(leg, 'knee'), 65),
-      jointActuator(`leopard-${leg.region}-${leg.side}-ankle`, legPawConnectionId(leg), 25),
+      jointActuator(legActuatorId(leg, 'knee'), legJointConnectionId(leg, 'knee'), LEOPARD_LEG_MECHANICS.kneeMaxTorque),
+      jointActuator(`leopard-${leg.region}-${leg.side}-ankle`, legPawConnectionId(leg), LEOPARD_LEG_MECHANICS.ankleMaxTorque),
     );
   }
   actuators.push(
@@ -413,8 +420,8 @@ export function createLeopardBlueprint(options: LeopardBlueprintOptions = {}): B
       id: 'leopard-head-range',
       kind: 'range',
       partId: 'leopard-head',
-      localPose: localPose(0.24, 0, 0),
-      forward: vector(1, 0, 0),
+      localPose: localPose(0.24, -0.14, 0),
+      forward: vector(1, -0.15, 0),
       updatePeriodTicks: 1,
       noise: { standardDeviation: 0.01 },
       latencyTicks: 0,
