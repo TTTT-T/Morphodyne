@@ -532,6 +532,29 @@ v0.1:
 
 ---
 
+### 11.1 Generic contact concentration (Animal Arena v0.5)
+
+PhysicsAdapter measures backend-neutral `ContactPatch` samples: world point and
+outward normal, normal impulse (N·s), substep-average normal force (N), effective
+area (m²), pressure (Pa), and sample duration (s). One loaded manifold owns one
+area; unloaded speculative contacts do not produce pressure. The first area
+proxy uses a 1 mm geometry support layer projected onto the tangent plane, with
+analytical rounded-shape approximations and the smaller footprint of the two
+colliders. It depends on geometry and current orientation, never Part names or
+Entity identity. This is a finite-compliance proxy, not a Hertz/FEM solution.
+
+Optional Material `yieldPressurePa` / `ultimatePressurePa` add local compressive
+failure conditions. Physics computes the outer-tick mean of the maximum local
+patch pressure for sustained overload and the maximum substep pressure for
+ultimate failure. Core integrates sustained force/pressure overload once using
+the strongest normalized condition, retains the existing impulse path, and
+separates incident connections on Part fracture. Omitted pressure capacities
+remain unbounded. Damage remains a Part-level structural approximation: local
+contact measurements do not yet create spatial dents, penetration, fragments,
+or a deforming collider. Rendering and Agent decisions never author damage.
+
+---
+
 ## 12. Environment
 
 Initial universal abstractions:

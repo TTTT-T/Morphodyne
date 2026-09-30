@@ -27,7 +27,7 @@ describe('Rapier impact and structural separation', () => {
 
     expect(physics.readPartImpactImpulse(body, 'target')).toBeCloseTo(5, 8);
     expect(physics.readPartAppliedImpulse(body, 'target')).toBeCloseTo(5, 8);
-    expect(physics.readPartContactLoad(body, 'target')).toEqual({ impulseNs: 0, forceN: 0 });
+    expect(physics.readPartContactLoad(body, 'target')).toMatchObject({ impulseNs: 0, forceN: 0, pressurePa:0, peakPressurePa:0, patches:[] });
     physics.step(1 / 60);
     expect(physics.readPartImpactImpulse(body, 'target')).toBe(0);
     expect(physics.readPartAppliedImpulse(body, 'target')).toBe(0);

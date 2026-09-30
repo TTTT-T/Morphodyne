@@ -45,7 +45,7 @@ export class StructuralDamageRuntime {
       if (contact.impulseNs > 0 || contact.forceN > 0) {
         const result = applyPartLoad(this.current, this.blueprint, {
           partId: part.id, impulseNs: Math.max(0, contact.impulseNs - previous),
-          forceN: contact.forceN, seconds, tick,
+          forceN: contact.forceN, pressurePa: contact.pressurePa, peakPressurePa: contact.peakPressurePa, seconds, tick,
         });
         this.current = result.state;
         events.push(...result.events);

@@ -11,7 +11,7 @@ describe('Animal Arena v0.2 autonomous session', () => {
     for (const id of ['leopard-a', 'leopard-b']) {
       const entity = world.inspectEntity(id)!;
       expect(entity.agentPresent).toBe(true);
-      expect(entity.partIds).toHaveLength(20);
+      expect(entity.partIds).toHaveLength(24);
       expect(entity.sensorIds.length).toBeGreaterThanOrEqual(6);
       expect(entity.actuatorIds.length).toBeGreaterThanOrEqual(8);
       expect(world.readBlueprint(id).parts.some((part) => part.id === 'leopard-jaw')).toBe(true);
@@ -83,20 +83,17 @@ describe('Animal Arena v0.2 autonomous session', () => {
     expect(opponentHeadContactTicks).toBeGreaterThan(10);
     expect(jawOpponentContactTicks).toBeGreaterThan(0);
     expect(maxHeadImpulseNs).toBeGreaterThan(0);
-    const headMaterialId = world.readBlueprint('leopard-a').parts
-      .find((part) => part.id === 'leopard-head')!.materialId;
-    const headToughnessImpulseNs = world.readBlueprint('leopard-a').materials
-      .find((material) => material.id === headMaterialId)!.toughnessImpulseNs!;
-    // The v0.4 traction gait presses harder than the v0.3 slider, so head
-    // contact can pass the surface-yield impulse while staying far below the
-    // structural toughness limit. Damage must remain a measured material/load
-    // result, not a duel milestone.
-    expect(maxHeadImpulseNs).toBeLessThan(headToughnessImpulseNs);
-    // The v0.4 traction gait can press the head past surface yield into light,
-    // measured deformation, but never near fracture in this fixture.
-    expect(deformationWhileOpponentsTouch).toBeLessThan(0.5);
-    expect(world.getDamageRuntime('leopard-a').state.parts['leopard-head'].damage.deformation)
-      .toBeLessThan(0.5);
+    // Real teeth change the contact path; v0.5 may cross material failure.
+    // A fractured Part must lose every incident physical connection.
+    expect(deformationWhileOpponentsTouch).toBeGreaterThan(0);
+    const damage = world.getDamageRuntime('leopard-a').state;
+    if (damage.parts['leopard-head'].damage.state === 'fractured') {
+      for (const connection of world.readBlueprint('leopard-a').connections
+        .filter(c => c.fromPartId === 'leopard-head' || c.toPartId === 'leopard-head')) {
+        expect(damage.connections[connection.id].connected).toBe(false);
+        expect(world.getPhysicsBody('leopard-a').connectionHandles.has(connection.id)).toBe(false);
+      }
+    }
     expect(session.agents.get('leopard-a')!.inspectDecisionHistory()
       .some((decision) => decision.tick > firstOpponentContact!.tick)).toBe(true);
     expect(observation.fighters.every((fighter) => Number.isFinite(fighter.position.x))).toBe(true);
