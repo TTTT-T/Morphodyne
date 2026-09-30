@@ -77,7 +77,7 @@ describe('Core actuation contract', () => {
       'Invalid actuator maxOutput: duplicate',
       'Unknown actuator connection: duplicate',
       'Invalid actuator responseTimeSeconds: rigid-motor',
-      'Actuator requires a revolute or prismatic connection: rigid-motor',
+      'Actuator requires a movable connection: rigid-motor',
     ]);
   });
 

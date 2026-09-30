@@ -194,8 +194,22 @@ export class SensorRuntime {
       }
       for (const connection of this.blueprint.connections) {
         if (connection.kind === 'rigid' || !reachable.has(connection.fromPartId) || !reachable.has(connection.toPartId)) continue;
-        result.push(emit('joint', [this.physics.readJointPosition(this.body, connection.id),
-          this.physics.readJointVelocity(this.body, connection.id)], connection.id));
+        if (connection.kind === 'spherical') {
+          const z = { x: 0, y: 0, z: 1 };
+          const x = { x: 1, y: 0, z: 0 };
+          const y = { x: 0, y: 1, z: 0 };
+          result.push(emit('joint', [
+            this.physics.readJointPosition(this.body, connection.id, z),
+            this.physics.readJointVelocity(this.body, connection.id, z),
+            this.physics.readJointPosition(this.body, connection.id, x),
+            this.physics.readJointVelocity(this.body, connection.id, x),
+            this.physics.readJointPosition(this.body, connection.id, y),
+            this.physics.readJointVelocity(this.body, connection.id, y),
+          ], connection.id));
+        } else {
+          result.push(emit('joint', [this.physics.readJointPosition(this.body, connection.id),
+            this.physics.readJointVelocity(this.body, connection.id)], connection.id));
+        }
       }
       return result;
     }

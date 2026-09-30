@@ -44,4 +44,25 @@ describe('physical sensor queries', () => {
     expect(physics.castSensorRay(origin, direction, 3, mount)?.distance).toBeCloseTo(1.7, 2);
     expect(physics.castSensorRay(origin, { x: 1, y: 0, z: 0 }, 3, mount)).toBeNull();
   });
+
+  it('sees another structure beyond its own connected parts', async () => {
+    const physics = await RapierPhysicsAdapter.create();
+    const body = physics.createBody({ id: 'sensor-structure', blueprint: {
+      id: 'two-parts', materials: [{ id: 'mat', density: 500, friction: 0.5, restitution: 0 }],
+      parts: [
+        { id: 'head', materialId: 'mat', geometry: { kind: 'box', halfExtents: { x: 0.2, y: 0.2, z: 0.2 } },
+          pose: { position: { x: 0, y: 2, z: 0 }, rotation: identity } },
+        { id: 'own-front', materialId: 'mat', geometry: { kind: 'box', halfExtents: { x: 0.2, y: 0.2, z: 0.2 } },
+          pose: { position: { x: 1, y: 2, z: 0 }, rotation: identity } },
+      ],
+      connections: [{ id: 'neck', kind: 'rigid', fromPartId: 'head', toPartId: 'own-front',
+        fromAnchor: { x: 0.5, y: 0, z: 0 }, toAnchor: { x: -0.5, y: 0, z: 0 } }],
+    } });
+    physics.createBox({ halfExtents: { x: 0.3, y: 0.3, z: 0.3 },
+      position: { x: 3, y: 2, z: 0 }, dynamic: false });
+    physics.step(1 / 60);
+    const hit = physics.castSensorRay({ x: 0, y: 2, z: 0 }, { x: 1, y: 0, z: 0 }, 4,
+      body.partHandles.get('head')!);
+    expect(hit?.distance).toBeCloseTo(2.7, 1);
+  });
 });

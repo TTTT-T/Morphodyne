@@ -15,6 +15,9 @@ export interface PhysicalContact {
   /** Contact point in world coordinates for sensor and debug observation. */
   readonly point: Vector3;
   readonly impulseNs: number;
+  /** Debug provenance. SensorRuntime omits it from Agent perceptions. */
+  readonly otherEntityId?: string;
+  readonly otherPartId?: string;
 }
 
 /** Solver contact load on one Part during the last completed step. */
@@ -90,7 +93,7 @@ export interface PhysicsAdapter {
   /** Estimated load at a live structural connection from the most recent completed step. */
   readConnectionLoad(body: PhysicsBody, connectionId: string): ConnectionLoad;
   readPartAngularVelocity(body: PhysicsBody, partId: string): Vector3;
-  /** First physical surface along a ray, excluding only the mounting Part collider. */
+  /** First physical surface along a ray, excluding Parts of the sensing structure. */
   castSensorRay(origin: Vector3, direction: Vector3, range: number, excludePartHandle: BodyHandle): RayHit | null;
   /**
    * Remove one runtime structural connection from the physics world. The
@@ -101,25 +104,30 @@ export interface PhysicsAdapter {
    * Apply one actuator output to a joint for the next physics step.
    *
    * `output` is a force magnitude for a prismatic connection and a torque
-   * magnitude for a revolute connection. The adapter applies equal and
-   * opposite output to the connected bodies along their current joint axis.
+   * magnitude for a revolute or spherical connection. The adapter applies
+   * equal and opposite output to the connected bodies along their current
+   * joint axis. A spherical joint uses `axis` in its from-Part local frame;
+   * omitted axes default to local Z for backward-compatible scalar callers.
    * Call this once for each active output before every `step`; the adapter
    * clears these continuous contributions after that step so they do not
    * persist or accumulate unexpectedly.
   */
-  applyJointOutput(body: PhysicsBody, connectionId: string, output: number): void;
+  applyJointOutput(body: PhysicsBody, connectionId: string, output: number, axis?: Vector3): void;
   /**
    * Read relative velocity along the current joint axis. The result is in
    * metres per second for prismatic connections and radians per second for
-   * revolute connections. Rigid connections cannot provide this readout.
+   * revolute or spherical connections. For spherical connections `axis` is
+   * expressed in the from-Part local frame and defaults to local Z.
+   * Rigid connections cannot provide this readout.
   */
-  readJointVelocity(body: PhysicsBody, connectionId: string): number;
+  readJointVelocity(body: PhysicsBody, connectionId: string, axis?: Vector3): number;
   /**
    * Read the current coordinate relative to the Blueprint pose. The result
-   * is in metres for prismatic connections and radians for revolute
-   * connections, with the sign following the connection axis.
+   * is in metres for prismatic connections and radians for revolute or
+   * spherical connections, with the sign following the connection axis.
+   * Spherical `axis` values are from-Part local and default to local Z.
    */
-  readJointPosition(body: PhysicsBody, connectionId: string): number;
+  readJointPosition(body: PhysicsBody, connectionId: string, axis?: Vector3): number;
   step(seconds: number): void;
   readPose(handle: BodyHandle): Pose;
   readLinearVelocity(handle: BodyHandle): Vector3;

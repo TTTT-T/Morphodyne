@@ -262,6 +262,24 @@ Signal
 
 Function arises from complete dependency networks rather than part labels.
 
+An articulated Connection may expose one rotational axis (revolute) or three
+rotational degrees of freedom about a shared anchor (spherical). The Blueprint
+declares these freedoms without naming an animal part or a physics backend.
+Optional passive angular supports declare a local axis, rest angle relative to
+the Blueprint pose, stiffness, damping, and an optional torque cap. The physics
+adapter applies each support as equal and opposite torques to the connected
+Parts, while actuator output remains a separate energy-limited path. This gives
+the same mechanism to passive structures, machines, and Agents; contact and
+joint constraints still determine motion and load. A spherical Connection may
+also declare independent `angularLimits` about from-Part local axes, using the
+same Blueprint-relative coordinate as proprioception and actuator output.
+Each limit defines a permitted interval and a unilateral stop with stiffness,
+damping, and a finite torque cap. Rapier 0.20 exposes no public spherical limit
+setter, so the adapter applies equal and opposite physical torques outside the
+interval. The stop is hard-ish and can overshoot under sufficient momentum or
+torque; passive support remains a separate centering response that acts inside
+the interval. Neither path directly edits pose or velocity.
+
 ### 4.5 Actuator
 
 **An actuator has output, not actions.**
@@ -610,6 +628,19 @@ Requirements:
 - seeded RNG
 
 Agents control inputs, not outcomes. Physics has final authority.
+
+The Rapier adapter chooses internal substeps from declared passive spring
+stiffness and the connected bodies' relative inverse inertia, keeping
+`stiffness × inverse inertia × substep² ≤ 0.5`. Structures without stiff
+passive supports keep ordinary outer-step integration. The adapter recomputes
+passive angular supports and stops at each substep to avoid numerical energy
+growth on light articulated links. Continuous actuator
+and external forces remain active for the full world tick; impulses are applied
+once. Contact force loads integrate all substep impulses and report the mean
+force over the world tick. Contact point geometry and per-point impulses are
+snapshots of the last internal substep, not whole-tick impulse totals. Sensors,
+Agent decisions, Energy allocation, and structural damage still use the world
+fixed step.
 
 Do not assume cross-platform bitwise determinism from the default Rapier build. Future replay/branching should use:
 
