@@ -114,4 +114,4 @@ blunt variant 只把这四颗 Part 的 geometry 换成 box halfExtents=(0.06,0.0
 
 最大限制是 rigid-body proxy：面积是几何 support-layer 近似，局部压强只驱动 Part 级 scalar deformation/fracture，并不挖孔、穿刺、改变 collider 形状或生成碎片。牙列只四颗 capsule，姿态/滑脱和接触载荷不同会影响结果。头部旧 impulse 容量在默认对抗中先失效；没有进一步调整战斗或 gait 去保证某种结果。没有偏离架构的语义捷径；上述低保真界限已补入 Architecture §11.1。
 
-实现提交：`627be1a`（generic contact pressure + physical jaw teeth）。证据报告另作独立提交；PR 指向 main，创建后记录 URL。保持在 v0.5 审查边界，不开始下一阶段。用户原有未跟踪 `Untitled.md` 保留且未提交。
+实现提交：`627be1a`（generic contact pressure + physical jaw teeth）。证据报告提交：`ebc9d56`。PR：[\#21](https://github.com/TTTT-T/Morphodyne/pull/21)，`codex/animal-arena-v0.5` → `main`。保持在 v0.5 审查边界，不开始下一阶段。用户原有未跟踪 `Untitled.md` 保留且未提交。
