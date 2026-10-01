@@ -98,7 +98,7 @@ describe('Animal Arena v0.2 autonomous session', () => {
       .some((decision) => decision.tick > firstOpponentContact!.tick)).toBe(true);
     expect(observation.fighters.every((fighter) => Number.isFinite(fighter.position.x))).toBe(true);
     expect(observation.fighters.every((fighter) => fighter.decisionCount > 0)).toBe(true);
-  });
+  }, 15000);
 
   it('restarts with fresh physics, sensor, Brain, energy, and damage state', async () => {
     const first = await createArenaSession();

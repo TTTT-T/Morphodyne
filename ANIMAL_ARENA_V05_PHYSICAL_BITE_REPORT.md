@@ -100,7 +100,7 @@ blunt variant 只把这四颗 Part 的 geometry 换成 box halfExtents=(0.06,0.0
 
 最终检查：
 
-- `npm test -- --disableConsoleIntercept`：**53 files / 214 tests 全通过**，11.67 s。包含 v0.4 traction、spherical limits、passive compliance、Energy、旧 external contact Damage、Construction、passive machine 和 Sensor/Brain 边界。
+- `npm test -- --disableConsoleIntercept`：**53 files / 214 tests 全通过**，2026-10-01 单用例超时调整后实际全量复跑 14.46 s，exit 0；命令内架构边界检查仍为 51 TypeScript files 通过。包含 v0.4 traction、spherical limits、passive compliance、Energy、旧 external contact Damage、Construction、passive machine 和 Sensor/Brain 边界。下列 typecheck/build/browser 结果保留自原交付验证，本次仅复跑上述全量命令。
 - `npm run typecheck`：通过。
 - `npm run build`：通过；Vite 保留已有大 bundle 提示，没有为本阶段引入依赖或拆包重构。
 - `npm run check:boundaries`：51 TypeScript files 通过。
@@ -109,6 +109,8 @@ blunt variant 只把这四颗 Part 的 geometry 换成 box halfExtents=(0.06,0.0
 - 主代理检查实际 diff 和运行结果；gpt6-luna 仅作只读面积方案和 anti-cheat 检查。Core/Physics 没有 Leopard/tooth 分支，没有攻击统计、Brain/Motor/Arena direct-damage、target ID 注入、grapple weld、freeze、teleport 或命中覆盖。测试记录 `applyJointOutput` 后原样转发，没有修改物理结果。
 
 旧测试的必要更新：Part 数 20→24；零接触 load 断言包含新测量字段；2400-tick 多场景回归的本地 timeout 改为 15 s，行为门槛保留。原 v0.2 session“永不接近 fracture”的断言与真实牙齿阶段不再相容，改为检查 fracture 时 incident Connection 和物理 joint 均真实移除，保留原运动、接触和决策证据。没有降低 v0.4 traction 验收阈值。
+
+独立审查反馈：600-tick 双豹用例在两次全量运行中超过默认 5000 ms，首次为 5286 ms；同文件单跑原时间预算时 3/3 通过。这些为审查方复现记录。本次只将 `src/tools/ArenaSession.test.ts` 的 `runs an autonomous physical trial with measured movement and jaw state` 用例 timeout 设为 15000 ms；未改其他用例的时间预算、600 ticks、任何行为/物理断言或生产物理逻辑。调整只容纳全量并行运行的耗时波动，不降低验收门槛；修改后全量实际结果见上。
 
 ## 当前限制与交付
 
