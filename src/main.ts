@@ -9,6 +9,8 @@ import { mountGodSandboxPanel } from './tools/GodSandboxPanel';
 import { createArenaSession } from './tools/ArenaSession';
 import { mountArenaPanel, type ArenaPanelHandle } from './tools/ArenaPanel';
 import { arenaPartVisual } from './tools/ArenaVisuals';
+import {readContactTraining} from './tools/ContactExperienceTransfer';
+import { mountContactLearningPanel } from './tools/ContactLearningPanel';
 
 const ROTATION = { x: 0, y: 0, z: 0, w: 1 } as const;
 const WORKBENCH: EnvironmentSpec = {
@@ -33,7 +35,11 @@ async function main(): Promise<void> {
   const app = document.querySelector<HTMLDivElement>('#app');
   if (!app) throw new Error('缺少页面根元素 #app');
   const renderer = new ThreeSmokeRenderer(app);
-  if (location.hash === '#arena') {
+  if (location.hash === '#contact-learning') {
+    await runContactLearning(app, renderer);
+    return;
+  }
+  if (location.hash === '#arena' || location.hash === '#arena-learning') {
     await runArena(app, renderer);
     return;
   }
@@ -44,7 +50,14 @@ async function main(): Promise<void> {
     padding: '8px 12px', color: '#edf2f3', background: '#303e48', border: '1px solid #63737e', borderRadius: '5px', cursor: 'pointer' });
   arenaLink.addEventListener('click', () => { if (sandboxPanel.prepareArena()) location.hash = 'arena'; });
   app.append(arenaLink);
-  addEventListener('hashchange', () => { if (location.hash === '#arena') location.reload(); });
+  const contactLink = document.createElement('button');
+  contactLink.className = 'arena-entry';
+  contactLink.textContent = '接触学习实验';
+  Object.assign(contactLink.style, { position: 'fixed', left: '120px', bottom: '16px', zIndex: '20',
+    padding: '8px 12px', color: '#edf2f3', background: '#303e48', border: '1px solid #63737e', borderRadius: '5px', cursor: 'pointer' });
+  contactLink.addEventListener('click', () => { if (sandboxPanel.prepareArena()) location.hash = 'contact-learning'; });
+  app.append(contactLink);
+  addEventListener('hashchange', () => { if (location.hash === '#arena' || location.hash === '#contact-learning') location.reload(); });
   const physics = await RapierPhysicsAdapter.create();
   const world = new WorldRuntime(physics, WORKBENCH);
   const construction = new ConstructionRuntime(world);
@@ -143,8 +156,25 @@ async function main(): Promise<void> {
   requestAnimationFrame(frame);
 }
 
+async function runContactLearning(app: HTMLElement, renderer: ThreeSmokeRenderer): Promise<void> {
+  const panel = await mountContactLearningPanel(app, renderer);
+  function frame(): void {
+    panel.frame();
+    renderer.render();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
 async function runArena(app: HTMLElement, renderer: ThreeSmokeRenderer): Promise<void> {
-  let session = await createArenaSession();
+  const experience=location.hash==='#arena-learning'?readContactTraining(sessionStorage):undefined;
+  if(location.hash==='#arena-learning'&&!experience){
+    const notice=document.createElement('section');notice.className='arena-panel';
+    const text=document.createElement('p');text.textContent='未找到可用的课程v2训练经验，请返回接触实验重新训练。';
+    const back=document.createElement('button');back.textContent='返回接触训练';back.addEventListener('click',()=>{location.hash='contact-learning';location.reload();});
+    notice.append(text,back);app.append(notice);return;
+  }
+  let session = await createArenaSession(experience?.parameters,experience?.frontContact??false);
   let panel: ArenaPanelHandle | undefined;
   let renderedHandles = new Set<number>();
   const drawSession = (): void => {
@@ -174,14 +204,17 @@ async function runArena(app: HTMLElement, renderer: ThreeSmokeRenderer): Promise
   const mount = (): void => {
     panel?.destroy();
     panel = mountArenaPanel(app, session.world, session.observer, async () => {
-      session = await createArenaSession();
+      const replacement=await createArenaSession(experience?.parameters,experience?.frontContact??false);
+      session.dispose();
+      session=replacement;
       drawSession();
       mount();
     });
   };
   drawSession();
   mount();
-  addEventListener('hashchange', () => { if (location.hash !== '#arena') location.reload(); });
+  if(experience){const label=document.createElement('p');label.style.cssText='position:fixed;bottom:16px;left:16px;color:white;background:#303e48;padding:8px;z-index:20';label.textContent=`双动物经验转移实验 · 同前端接触形态 · 课程v2选中策略 ${experience.trainingEpisodes}练习条件 · 搜索${experience.searchCandidates}候选/${experience.searchEpisodes}次 · 不代表已证明持续打斗改善`;app.append(label);}
+  addEventListener('hashchange', () => { if (location.hash !== '#arena' && location.hash !== '#arena-learning') location.reload(); });
   let previousTime: number | undefined;
   let lastRefreshTick = -1;
   function frame(now: number): void {

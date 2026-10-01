@@ -272,6 +272,14 @@ export class ThreeSmokeRenderer {
     this.setSelectedPart(undefined);
   }
 
+  /** Side view keeps a local mechanism visible beside the experiment panel. */
+  frameContactSubject(centerX: number): void {
+    this.camera.fov=50;
+    this.camera.updateProjectionMatrix();
+    this.camera.position.set(centerX-2,2.8,6);
+    this.camera.lookAt(centerX-2,1,0);
+  }
+
   frameArena(): void {
     this.camera.fov = 50;
     this.camera.updateProjectionMatrix();

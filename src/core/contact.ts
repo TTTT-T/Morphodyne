@@ -10,6 +10,8 @@ export interface ContactPatch {
   readonly effectiveAreaM2: number;
   readonly pressurePa: number;
   readonly seconds: number;
+  /** Start of this sample within the last outer physics step, in seconds. */
+  readonly sampleOffsetSeconds?: number;
   /** Debug provenance only; excluded from Sensor/Agent observations. */
   readonly otherEntityId?: string;
   readonly otherPartId?: string;

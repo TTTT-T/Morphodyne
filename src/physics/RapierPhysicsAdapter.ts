@@ -308,10 +308,28 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
   private readonly appliedWrenches = new Map<RAPIER.RigidBody, AppliedWrench>();
   private readonly staticWorldBoxHandles = new Set<BodyHandle>();
   private nextHandle = 1;
+  private disposed = false;
 
   static async create(): Promise<RapierPhysicsAdapter> {
     await RAPIER.init();
     return new RapierPhysicsAdapter();
+  }
+
+  /** Ends an isolated session; callers must not use bodies after this call. */
+  dispose(): void {
+    if(this.disposed)return;
+    this.disposed=true;
+    this.eventQueue.free();
+    this.world.free();
+    this.bodies.clear();
+    this.activeRuntimeBodies.clear();
+    this.partRuntimeReferences.clear();
+    this.colliderGeometries.clear();
+    this.colliderRuntimeReferences.clear();
+    this.stepScopedForceBodies.clear();
+    this.stepForceInputs.clear();
+    this.appliedWrenches.clear();
+    this.staticWorldBoxHandles.clear();
   }
 
   createBox(spec: BoxSpec): BodyHandle {
@@ -1110,6 +1128,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
               const forceN = impulseNs/substepSeconds;
               patches.push({ point: scale(weightedPoint, 1/impulseNs), normal, impulseNs, forceN,
                 effectiveAreaM2, pressurePa: forceN/effectiveAreaM2, seconds: substepSeconds,
+                sampleOffsetSeconds: substep * substepSeconds,
                 ...(otherReference ? { otherEntityId: otherReference.runtimeBody.entityId,
                   otherPartId: otherReference.partId } : {}) });
             });

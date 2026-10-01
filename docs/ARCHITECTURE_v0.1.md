@@ -102,6 +102,8 @@ The development center now returns to:
 
 **World → Structure → Construction → Environment → Interaction.**
 
+After Phase 14 and accepted Playable Lab v0.1 (2026-10-01), explicit user authorization permits the bounded Body Contact Learning v0.1 experiment: anonymous sensor-driven short-chain contact control, finite parameter search and experience, and controlled held-out validation. The historical freeze still applies to unrelated planning, whole-body RL, LLM, social behavior and gait expansion. This exception does not change World-first ownership or physics authority; see `BODY_CONTACT_LEARNING_V01_KICKOFF.md`.
+
 ---
 
 ## 3. Technical direction
@@ -536,7 +538,11 @@ v0.1:
 
 PhysicsAdapter measures backend-neutral `ContactPatch` samples: world point and
 outward normal, normal impulse (N·s), substep-average normal force (N), effective
-area (m²), pressure (Pa), and sample duration (s). One loaded manifold owns one
+area (m²), pressure (Pa), and sample duration (s). Rapier also records each
+sample's start offset within the outer tick, so external bilateral-contact
+measurements require overlapping physical intervals rather than combining
+alternating unilateral substeps. This metadata does not alter solver forces or
+enter Agent observations. One loaded manifold owns one
 area; unloaded speculative contacts do not produce pressure. The first area
 proxy uses a 1 mm geometry support layer projected onto the tangent plane, with
 analytical rounded-shape approximations and the smaller footprint of the two

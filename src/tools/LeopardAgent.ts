@@ -2,6 +2,7 @@ import { createControlSignal, type ControlSignal } from '../core/actuation';
 import type { Decision, DecisionPolicy, DecisionPolicyInput, SkillName } from '../core/brainPolicy';
 import type { AgentPerceptionView } from '../core/sensing';
 import { LEOPARD_LEG_MECHANICS } from './LeopardBlueprint';
+import {ContactSkillRuntime} from '../simulation/ContactSkillRuntime';
 import { BrainRuntime, type BrainSnapshot, type SkillIntent } from '../simulation/BrainRuntime';
 
 const clamp = (value: number): number => Math.max(-1, Math.min(1, value));
@@ -491,7 +492,7 @@ class TractionGait {
 
 /** One instance per Entity. No world/physics object is reachable by the Brain or motor layer. */
 export class LeopardAgentRuntime {
-  private readonly brain = new BrainRuntime(new EngagementDecisionPolicy(), 4);
+  private readonly brain: BrainRuntime;
   private readonly motor: TractionGait | PhaseSineGait;
   private readonly traction: TractionGait;
   private snapshot: LeopardAgentSnapshot = {
@@ -500,7 +501,8 @@ export class LeopardAgentRuntime {
   private lastDecisionKey = '';
   private readonly decisionHistory: LeopardDecisionRecord[] = [];
 
-  constructor(gait: LeopardGaitKind = 'traction', tuning: TractionTuning = {}) {
+  constructor(gait: LeopardGaitKind = 'traction', tuning: TractionTuning = {}, policy: DecisionPolicy = new EngagementDecisionPolicy(), private readonly contactSkill?: ContactSkillRuntime) {
+    this.brain = new BrainRuntime(policy, 4);
     this.traction = new TractionGait(tuning);
     this.motor = gait === 'phase-sine' ? new PhaseSineGait() : this.traction;
   }
@@ -518,8 +520,14 @@ export class LeopardAgentRuntime {
     this.lastDecisionKey = decisionKey;
     this.snapshot = { goal: brain.decision?.goal.kind ?? 'none', skill: brain.skillIntent.skill,
       stability: brain.selfModel.stability.level, perceptionTick: view.tick, decisionCount };
-    return this.motor.update(buildFrame(brain), seconds);
+    const signals=this.motor.update(buildFrame(brain), seconds);
+    if(!this.contactSkill || brain.skillIntent.skill!=='interact')return signals;
+    const contact=this.contactSkill.update(view);
+    const owned=new Set(this.contactSkill.binding.axes.map(a=>a.actuatorId));
+    return [...signals.filter(s=>!owned.has(s.actuatorId)),...contact];
   }
+
+  inspectContactExperience() { return this.contactSkill?.inspect(); }
 
   inspect(): LeopardAgentSnapshot { return { ...this.snapshot }; }
 
