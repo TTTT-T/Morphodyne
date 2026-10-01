@@ -40,9 +40,9 @@ async function main(): Promise<void> {
   const arenaLink = document.createElement('button');
   arenaLink.className = 'arena-entry';
   arenaLink.textContent = '进入 Arena';
-  Object.assign(arenaLink.style, { position: 'fixed', right: '16px', top: '16px', zIndex: '20',
+  Object.assign(arenaLink.style, { position: 'fixed', left: '16px', bottom: '16px', zIndex: '20',
     padding: '8px 12px', color: '#edf2f3', background: '#303e48', border: '1px solid #63737e', borderRadius: '5px', cursor: 'pointer' });
-  arenaLink.addEventListener('click', () => { location.hash = 'arena'; });
+  arenaLink.addEventListener('click', () => { if (sandboxPanel.prepareArena()) location.hash = 'arena'; });
   app.append(arenaLink);
   addEventListener('hashchange', () => { if (location.hash === '#arena') location.reload(); });
   const physics = await RapierPhysicsAdapter.create();
@@ -74,8 +74,9 @@ async function main(): Promise<void> {
         if (handle === undefined) continue;
         currentHandles.add(handle);
         if (!renderedHandles.has(handle)) renderer.addPart(handle, part.geometry,
-          entity.id.includes('payload') ? 0xe0aa70 : 0x86b9ad);
+          blueprint.id === 'sandbox-passive-payload' ? 0xe0aa70 : 0x86b9ad);
         renderer.setPose(handle, body.readPartPose(part.id));
+        renderer.setPartCondition(handle, damage.parts[part.id]?.damage.state ?? 'intact');
       }
       for (const connection of blueprint.connections) {
         if (!body.partHandles.has(connection.fromPartId) || !body.partHandles.has(connection.toPartId)) continue;
@@ -116,7 +117,7 @@ async function main(): Promise<void> {
     const selectedHandle = selectedEntityId && selectedPartId
       ? world.inspectEntity(selectedEntityId) && world.getPhysicsBody(selectedEntityId).partHandles.get(selectedPartId)
       : undefined;
-    renderer.setSelectedPart(selectedHandle || undefined);
+    renderer.setSelectedPart(selectedHandle ?? undefined);
     renderer.setDaylightFactor(world.environment.state.daylightFactor);
   }
 
@@ -130,6 +131,7 @@ async function main(): Promise<void> {
     const elapsed = previousTime === undefined ? 0 : Math.max(0, (now - previousTime) / 1000);
     previousTime = now;
     world.advance(elapsed);
+    sandboxPanel.observe();
     if (world.tick !== lastRefreshTick && world.tick % 15 === 0) {
       sandboxPanel.refresh();
       lastRefreshTick = world.tick;

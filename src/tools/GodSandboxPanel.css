@@ -16,6 +16,8 @@
   font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
 }
 
+.god-sandbox[hidden] { display: none; }
+
 .god-sandbox h2 {
   margin: 0;
   font: 600 15px/1.3 ui-sans-serif, system-ui, sans-serif;
@@ -184,4 +186,44 @@
 
 .god-sandbox-advanced > fieldset {
   margin-top: 8px;
+}
+
+.lab-dashboard {
+  position: fixed;
+  left: 16px;
+  top: 16px;
+  width: min(390px, calc(100vw - 490px));
+  max-height: calc(100vh - 88px);
+  overflow: auto;
+  padding: 14px;
+  box-sizing: border-box;
+  z-index: 20;
+  color: #e9edf2;
+  background: rgba(15, 25, 31, .96);
+  border: 1px solid #527b76;
+  border-radius: 8px;
+  font: 13px/1.5 system-ui, -apple-system, "PingFang SC", sans-serif;
+}
+.lab-dashboard h1 { font-size: 18px; margin: 0 0 8px; }
+.lab-dashboard p { margin: 8px 0; }
+.lab-dashboard .lab-actions { display: flex; flex-wrap: wrap; gap: 5px; margin: 9px 0; }
+.lab-dashboard button { padding: 6px 8px; border: 1px solid #668e8a; border-radius: 4px; background: #284a49; color: #eef5f3; cursor: pointer; font: inherit; }
+.lab-dashboard button:hover { background: #38605d; }
+.lab-dashboard input, .lab-dashboard select, .lab-dashboard textarea { box-sizing: border-box; width: 100%; color: #eef5f3; background: #26363f; border: 1px solid #668e8a; padding: 5px; font: inherit; }
+.lab-dashboard textarea { min-height: 100px; }
+.lab-dashboard pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; }
+.lab-dashboard .lab-result { border-left: 3px solid #8bddc0; padding: 8px; background: #23363b; }
+.lab-dashboard details { margin: 8px 0; }
+.lab-dashboard summary { cursor: pointer; color: #b9ddce; }
+.lab-dashboard small { color: #b4c8cf; }
+.lab-dashboard .lab-status { color: #9ee2bc; }
+.lab-dashboard .lab-status[data-error='true'] { color: #ffb4a9; }
+.god-sandbox { width: min(400px, calc(100vw - 32px)); }
+@media (max-width: 900px) {
+  .lab-dashboard { width: calc(48vw - 24px); padding: 10px; }
+  .god-sandbox { width: calc(48vw - 24px); }
+}
+@media (max-width: 600px) {
+  .lab-dashboard { left: 8px; top: 8px; width: calc(100vw - 16px); max-height: 38vh; }
+  .god-sandbox { top: calc(38vh + 16px); right: 8px; width: calc(100vw - 16px); max-height: calc(62vh - 72px); }
 }
