@@ -20,6 +20,9 @@ import type { EnergyState } from '../simulation/EnergyRuntime';
 import { ManualControlSource } from './ManualControlSource';
 import { SANDBOX_CATALOG } from './sandboxTemplates';
 import { createSandboxPayloadBlueprint } from './sandboxBlueprintCatalog';
+import { LAB_RETURN_KEY, LAB_TIME_SCALES, parseLabDesign, type LabDesign, type LabExperiment } from './LabDesign';
+import { LabObservation } from './LabObservation';
+import { mountLabPanel, type LabPanelHandle } from './LabPanel';
 
 const IDENTITY_ROTATION = { x: 0, y: 0, z: 0, w: 1 } as const;
 const IDENTITY_POSE = { position: { x: 0, y: 0, z: 0 }, rotation: IDENTITY_ROTATION } as const;
@@ -43,6 +46,8 @@ export interface GodSandboxPanelOptions {
 }
 
 export interface GodSandboxWorld {
+  readonly tick?: number;
+  readonly fixedSeconds?: number;
   paused: boolean;
   stepOnce(): void;
   setTimeScale(value: number): void;
@@ -97,6 +102,8 @@ export interface GodSandboxConstruction {
 }
 
 export interface GodSandboxPanelHandle {
+  observe(): void;
+  prepareArena(): boolean;
   readonly element: HTMLElement;
   refresh(): void;
   destroy(): void;
@@ -378,7 +385,13 @@ export function mountGodSandboxPanel(
   let controlRenderKey = '';
   const manualSources = new Map<string, ManualControlSource>();
   const templateIds = new Map<string, string>();
-  const companionIds = new Map<string, string>();
+  const companionIds = new Map<string, Set<string>>();
+  const initialConfigs = new Map<string, { origin: Vector3; energy?: EnergySourceSpec }>();
+  const observation = new LabObservation();
+  let labPanel: LabPanelHandle | undefined;
+  let experiment: LabExperiment = 'grip';
+  let trialStarted = false;
+  let stopAtTick: number | undefined;
   function editing(): boolean { return world.paused; }
   function requireEdit(): void { if (!editing()) throw new Error('请先暂停，进入编辑模式'); }
 
@@ -404,10 +417,10 @@ export function mountGodSandboxPanel(
   advanced.append(advancedSummary);
 
   const time = fieldset(timeGroup, '时间控制');
-  const pauseButton = button(time, '', () => run('运行状态已更新', () => { world.paused = !world.paused; }));
-  const stepButton = button(time, '单步运行', () => run('已前进一步', () => world.stepOnce()));
+  const pauseButton = button(time, '', () => run('运行状态已更新', () => { if (!trialStarted) beginTrial(); world.paused = !world.paused; }));
+  const stepButton = button(time, '单步运行', () => run('已前进一步', () => { if (!trialStarted) beginTrial(); world.stepOnce(); observation.sample(world, construction); }));
   const timeScale = labeled(time, '时间速度', selectInput());
-  for (const value of [0.1, 0.25, 0.5, 1, 2]) addOption(timeScale, String(value), `${value}×`, value === 1);
+  for (const value of LAB_TIME_SCALES) addOption(timeScale, String(value), `${value}×`, value === 1);
   timeScale.addEventListener('change', () => run(`时间速度已设为 ${timeScale.value} 倍`, () => world.setTimeScale(parseNumber(timeScale.value, '时间速度'))));
   hint(time, '暂停后可单步观察；时间速度会影响模拟推进快慢。');
 
@@ -461,40 +474,53 @@ export function mountGodSandboxPanel(
       },
     };
     construction.spawn(entity, spawnOptions);
+    initialConfigs.set(entity.id, { origin: { ...spawnOptions.origin! }, ...(spawnOptions.energy ? { energy: { ...spawnOptions.energy } } : {}) });
     if (templateId === 'gripper') {
       const payloadId = nextSandboxEntityId('sandbox-payload');
       construction.spawn({ id: payloadId, blueprint: createSandboxPayloadBlueprint() }, { origin: spawnOptions.origin });
-      companionIds.set(entity.id, payloadId);
+      companionIds.set(entity.id, new Set([payloadId]));
+      initialConfigs.set(payloadId, { origin: { ...spawnOptions.origin! } });
+      manualSources.set(payloadId, new ManualControlSource());
     }
     manualSources.set(entity.id, manual);
     templateIds.set(entity.id, templateId);
     selectedEntityId = entity.id;
     entityIdInput.value = nextSandboxEntityId();
   }
+  function replaceTemplates(removeIds: readonly string[], templateId = blueprintChoice.value): void {
+    const existing = new Set(world.listEntities().map(entity => entity.id));
+    const previousSelection = selectedEntityId;
+    // Create and validate replacements before removing any existing design.
+    try { spawnTemplate(templateId); }
+    catch (error) {
+      for (const entity of world.listEntities()) if (!existing.has(entity.id)) world.removeEntity?.(entity.id);
+      pruneRemovedEntities();
+      selectedEntityId = previousSelection;
+      throw error;
+    }
+    for (const id of removeIds) world.removeEntity?.(id);
+    pruneRemovedEntities();
+    trialStarted = false;
+    stopAtTick = undefined;
+    observation.begin(world, construction, captureDesign('模板新试验'));
+  }
   button(spawn, '生成模板', () => run('已生成结构', () => spawnTemplate(), true));
-  button(spawn, '重置当前模板', () => run('已重置当前模板', () => {
+  button(spawn, '恢复选中原始模板', () => run('已重置当前模板', () => {
+    sessionStorage.setItem('morphodyne.lab.switch-backup.v1', JSON.stringify(captureDesign('恢复模板前设计')));
     const selectedId = requireEntity();
     const id = templateIds.has(selectedId) ? selectedId
-      : [...companionIds].find(([, companionId]) => companionId === selectedId)?.[0] ?? selectedId;
+      : [...companionIds].find(([, children]) => children.has(selectedId))?.[0] ?? selectedId;
     const templateId = templateIds.get(id);
     if (!templateId || !world.removeEntity) throw new Error('当前物体不是可重置的模板');
     requireEdit();
-    const companionId = companionIds.get(id);
-    if (companionId && world.listEntities().some((entity) => entity.id === companionId)) world.removeEntity(companionId);
-    world.removeEntity(id);
-    manualSources.delete(id);
-    templateIds.delete(id);
-    companionIds.delete(id);
-    spawnTemplate(templateId);
+    const children = companionIds.get(id) ?? new Set<string>();
+    replaceTemplates([id, ...children], templateId);
   }, true));
   button(spawn, '重新生成场景', () => run('场景已重新生成', () => {
     if (!world.removeEntity) throw new Error('当前世界不支持重建场景');
     requireEdit();
-    for (const entity of world.listEntities()) world.removeEntity(entity.id);
-    manualSources.clear();
-    templateIds.clear();
-    companionIds.clear();
-    spawnTemplate();
+    sessionStorage.setItem('morphodyne.lab.switch-backup.v1', JSON.stringify(captureDesign('重新生成前设计')));
+    replaceTemplates(world.listEntities().map(entity => entity.id));
   }, true));
 
   const selection = fieldset(worldGroup, '当前世界与物体');
@@ -727,9 +753,12 @@ export function mountGodSandboxPanel(
     const inspection = requireInspection();
     const id = selectedValue(actuatorChoice);
     if (!id) throw new Error('请选择执行器');
+    const actuator = readActuator(id);
+    const manual = manualSources.get(inspection.entity.id);
+    const request = manual?.get(id) ?? 0;
     construction.replaceBlueprint(inspection.entity.id, { ...inspection.blueprint,
-      actuators: inspection.blueprint.actuators?.map((entry) => entry.id === id ? readActuator(id) : entry) });
-    manualSources.get(inspection.entity.id)?.delete(id);
+      actuators: inspection.blueprint.actuators?.map(entry => entry.id === id ? actuator : entry) });
+    manual?.set(id, actuator.kind === 'tension' ? 'tension' : 'joint', request);
   }, true));
   const removeActuatorButton = button(actuatorActions, '删除执行器', () => run('已删除执行器', () => {
     requireEdit();
@@ -823,6 +852,7 @@ export function mountGodSandboxPanel(
       energy: supply,
       control: manual.control,
     });
+    initialConfigs.set(entity.id, { origin: { ...(options.spawnOptions?.origin ?? { x: 0, y: 0, z: 0 }) }, energy: { ...supply } });
     manualSources.set(entity.id, manual);
     selectedEntityId = entity.id;
   }, true));
@@ -885,6 +915,7 @@ export function mountGodSandboxPanel(
   function run(success: string, action: () => void, resetDrafts = false): void {
     try {
       action();
+      pruneRemovedEntities();
       if (resetDrafts) {
         blueprintDraftDirty = false;
         partDraftDirty = false;
@@ -1003,9 +1034,7 @@ export function mountGodSandboxPanel(
       }
     }
     const activeActuatorIds = new Set(entity.actuatorIds);
-    for (const actuator of blueprint.actuators ?? []) {
-      if (!activeActuatorIds.has(actuator.id)) manualSources.get(entity.id)?.delete(actuator.id);
-    }
+    // Inactive actuators retain requested signals for fresh design retry, never physical output.
     const nextControlKey = `${entity.id}/${(blueprint.actuators ?? []).map((actuator) => `${actuator.id}:${actuator.kind}:${activeActuatorIds.has(actuator.id)}`).join(',')}`;
     if (nextControlKey !== controlRenderKey) {
       controlRows.textContent = '';
@@ -1139,7 +1168,8 @@ export function mountGodSandboxPanel(
       selectedConnectionId = undefined;
       selectedComponentId = undefined;
       blueprintDraftDirty = false;
-      partDraftDirty = false;
+      partDraftDirty = materialDraftDirty = connectionDraftDirty = actuatorDraftDirty = false;
+      selectedActuatorId = undefined;
       refresh();
   });
   partChoice.addEventListener('change', () => {
@@ -1159,15 +1189,151 @@ export function mountGodSandboxPanel(
     stepButton.disabled = !editing();
     renderEntityOptions();
     renderInspection();
+    labPanel?.refresh();
   }
 
-  if (world.listEntities().length === 0 && catalog.some((entry) => entry.id === 'tension-mechanism')) {
-    blueprintChoice.value = 'tension-mechanism';
-    spawnTemplate();
+  function pruneRemovedEntities(): void {
+    const live = new Set(world.listEntities().map(e => e.id));
+    for (const [parent, children] of companionIds) {
+      if (!live.has(parent)) companionIds.delete(parent);
+      else for (const child of children) if (!live.has(child)) children.delete(child);
+    }
+    for (const map of [initialConfigs, manualSources, templateIds]) for (const id of map.keys()) if (!live.has(id)) map.delete(id);
   }
+
+  function captureDesign(name: string): LabDesign {
+    const live = new Set(world.listEntities().map(e => e.id));
+    return parseLabDesign(JSON.stringify({ format: 'morphodyne-lab', version: 1, name, experiment,
+      environment: { weather: world.environment?.state?.weather ?? 'clear', timeOfDay: world.environment?.state?.timeOfDay ?? 12 },
+      timeScale: Number(timeScale.value), impulse: { x: Number(impulseX.value), y: Number(impulseY.value), z: Number(impulseZ.value) },
+      entities: world.listEntities().map(entity => {
+        const config = initialConfigs.get(entity.id);
+        if (!config) throw new Error('当前物体缺少出生配置，不能保存完整设计');
+        const blueprint = construction.inspect(entity.id).blueprint;
+        const manual = manualSources.get(entity.id);
+        const companionOf = [...companionIds].find(([parent, children]) => live.has(parent) && children.has(entity.id))?.[0];
+        return { key: entity.id, blueprint, ...config,
+          controls: Object.fromEntries((blueprint.actuators ?? []).map(a => [a.id, manual?.get(a.id) ?? 0])),
+          templateId: templateIds.get(entity.id), companionOf };
+      }) }), blueprint => construction.validate(blueprint));
+  }
+
+  function beginTrial(): void {
+    observation.begin(world, construction, captureDesign('试验起始条件'));
+    trialStarted = true;
+  }
+
+  function restoreDesign(input: LabDesign): void {
+    const design = parseLabDesign(JSON.stringify(input), blueprint => construction.validate(blueprint));
+    if (!world.removeEntity) throw new Error('当前世界不支持重新试验');
+    const wasPaused = world.paused;
+    world.paused = true;
+    const previousIds = world.listEntities().map(e => e.id);
+    const previousSettings = { timeScale: Number(timeScale.value), weather: world.environment?.state?.weather ?? 'clear', timeOfDay: world.environment?.state?.timeOfDay ?? 12 };
+    const ids = new Map(design.entities.map(e => [e.key, nextSandboxEntityId('lab-trial')]));
+    const staged = new Map<string, ManualControlSource>();
+    try {
+      for (const entry of design.entities) {
+        const id = ids.get(entry.key)!;
+        const manual = new ManualControlSource();
+        for (const actuator of entry.blueprint.actuators ?? []) manual.set(actuator.id, actuator.kind === 'tension' ? 'tension' : 'joint', entry.controls[actuator.id] ?? 0);
+        construction.spawn({ id, blueprint: entry.blueprint }, { origin: entry.origin,
+          ...(entry.energy ? { energy: entry.energy, control: manual.control } : {}) });
+        staged.set(id, manual);
+      }
+      // Execute every validated runtime setting while the previous world still exists.
+      world.setTimeScale(design.timeScale);
+      world.environment?.setWeather(design.environment.weather);
+      world.environment?.setTimeOfDay(design.environment.timeOfDay);
+    } catch (error) {
+      for (const id of ids.values()) if (world.listEntities().some(e => e.id === id)) world.removeEntity(id);
+      world.setTimeScale(previousSettings.timeScale);
+      world.environment?.setWeather(previousSettings.weather);
+      world.environment?.setTimeOfDay(previousSettings.timeOfDay);
+      world.paused = wasPaused;
+      throw error;
+    }
+    for (const id of previousIds) world.removeEntity(id);
+    initialConfigs.clear(); manualSources.clear(); templateIds.clear(); companionIds.clear();
+    for (const entry of design.entities) {
+      const id = ids.get(entry.key)!;
+      initialConfigs.set(id, { origin: entry.origin, ...(entry.energy ? { energy: entry.energy } : {}) });
+      manualSources.set(id, staged.get(id)!);
+      if (entry.templateId) templateIds.set(id, entry.templateId);
+      if (entry.companionOf) {
+        const parent = ids.get(entry.companionOf)!;
+        const children = companionIds.get(parent) ?? new Set<string>();
+        children.add(id);
+        companionIds.set(parent, children);
+      }
+    }
+    experiment = design.experiment;
+    timeScale.value = String(design.timeScale);
+    const primary = design.entities[0];
+    if (primary.templateId && catalog.some(e => e.id === primary.templateId)) blueprintChoice.value = primary.templateId;
+    spawnX.value = String(primary.origin.x); spawnY.value = String(primary.origin.y); spawnZ.value = String(primary.origin.z);
+    if (primary.energy) { capacityInput.value = String(primary.energy.capacityJ); powerInput.value = String(primary.energy.maxPowerWatts); efficiencyInput.value = String(primary.energy.efficiency); }
+    impulseX.value = String(design.impulse.x); impulseY.value = String(design.impulse.y); impulseZ.value = String(design.impulse.z);
+    selectedEntityId = ids.get(design.entities[0].key);
+    selectedPartId = undefined; selectedConnectionId = undefined; selectedComponentId = undefined; selectedActuatorId = undefined;
+    blueprintDraftDirty = partDraftDirty = materialDraftDirty = connectionDraftDirty = actuatorDraftDirty = false;
+    trialStarted = false; stopAtTick = undefined;
+    observation.begin(world, construction, captureDesign(design.name));
+    onChanged(); refresh();
+  }
+
+  function starterDesign(kind: LabExperiment): LabDesign {
+    const templateId = kind === 'lift' ? 'tension-mechanism' : kind === 'damage' ? 'joint-mechanism' : 'gripper';
+    const entry = catalog.find(e => e.id === templateId);
+    if (!entry) throw new Error('当前目录没有这个实验模板');
+    let blueprint = blueprintFromEntry(entry);
+    if (kind === 'damage') blueprint = { ...blueprint, connections: blueprint.connections.map(c => ({ ...c, strengthImpulseNs: 1 })) };
+    const controls = Object.fromEntries((blueprint.actuators ?? []).map((a, i) => [a.id, kind === 'damage' ? 0 : templateId === 'gripper' && i === 1 ? -1 : 1]));
+    const machine = { key: 'machine', blueprint, origin: { x: 0, y: 0, z: 0 },
+      energy: entry.spawnOptions?.energy ?? { capacityJ: 1000, maxPowerWatts: 150, efficiency: 0.8 }, controls, templateId };
+    return { format: 'morphodyne-lab', version: 1, name: '基础实验', experiment: kind,
+      environment: { weather: 'clear', timeOfDay: 12 }, timeScale: 1, impulse: { x: 3, y: 0, z: 0 },
+      entities: templateId === 'gripper' ? [machine, { key: 'payload', blueprint: createSandboxPayloadBlueprint(), origin: { x: 0, y: 0, z: 0 }, controls: {}, companionOf: 'machine' }] : [machine] };
+  }
+
+  if (world.listEntities().length === 0) {
+    if (catalog.some(entry => entry.id === 'gripper')) restoreDesign(starterDesign('grip'));
+    else if (catalog.length) { experiment = 'custom'; spawnTemplate(catalog[0].id); observation.begin(world, construction, captureDesign('基础设计')); }
+  }
+  labPanel = mountLabPanel(host, {
+    hasDesign: () => world.listEntities().length > 0,
+    capture: captureDesign, restore: restoreDesign,
+    experiment: kind => restoreDesign(starterDesign(kind)),
+    run: () => { stopAtTick = undefined; if (!trialStarted) beginTrial(); world.paused = false; refresh(); },
+    runBriefly: () => { if (!trialStarted) beginTrial(); stopAtTick = (world.tick ?? 0) + Math.ceil(3 / (world.fixedSeconds ?? 1 / 60)); world.paused = false; refresh(); },
+    pause: () => { world.paused = true; observation.sample(world, construction); refresh(); },
+    impulse: () => {
+      if (experiment !== 'damage') throw new Error('请先选择结构损伤实验');
+      world.paused = true;
+      if (!trialStarted) beginTrial();
+      const entity = world.listEntities().find(e => construction.inspect(e.id).blueprint.parts.some(p => p.id === 'joint-arm'));
+      if (!entity) throw new Error('没有可施加冲击的关节悬臂');
+      const inspection = construction.inspect(entity.id);
+      const component = inspection.components.find(c => c.partIds.includes('joint-arm'));
+      if (!component) throw new Error('找不到悬臂结构组件');
+      construction.applyImpact(component.id, 'joint-arm', { x: Number(impulseX.value), y: Number(impulseY.value), z: Number(impulseZ.value) });
+      world.stepOnce(); observation.sample(world, construction); onChanged(); refresh();
+    },
+    result: () => observation.read(world, construction, captureDesign('当前条件')),
+    validate: blueprint => construction.validate(blueprint),
+  });
+  try {
+    const returning = sessionStorage.getItem(LAB_RETURN_KEY);
+    if (returning) { restoreDesign(parseLabDesign(returning, blueprint => construction.validate(blueprint))); sessionStorage.removeItem(LAB_RETURN_KEY); setStatus('已恢复 Arena 前的声明设计；当前是新的暂停试验。'); }
+  } catch (error) { setStatus(`返回设计恢复失败，备份保留：${formatError(error)}`, true); }
   refresh();
   return {
     element: root,
+    observe: () => {
+      observation.sample(world, construction);
+      if (stopAtTick !== undefined && (world.tick ?? 0) >= stopAtTick) { world.paused = true; stopAtTick = undefined; refresh(); }
+    },
+    prepareArena: () => labPanel?.prepareArena() ?? false,
     refresh,
     destroy: () => root.remove(),
   };
