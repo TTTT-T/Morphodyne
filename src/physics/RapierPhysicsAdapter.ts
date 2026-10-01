@@ -1,5 +1,7 @@
+import { estimateContactAreaM2 } from './contactArea';
+import type { ContactPatch } from '../core/contact';
 import RAPIER from '@dimforge/rapier3d-compat';
-import type { AngularLimit, Connection, Entity, Material, Part, PassiveAngular, Pose, Quaternion, Vector3 } from '../core/model';
+import type { AngularLimit, Connection, Entity, Geometry, Material, Part, PassiveAngular, Pose, Quaternion, Vector3 } from '../core/model';
 import { validateBlueprint } from '../core/model';
 import type {
   BodyHandle,
@@ -299,6 +301,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
   private readonly runtimeBodies = new WeakMap<PhysicsBody, RuntimePhysicsBody>();
   private readonly activeRuntimeBodies = new Set<RuntimePhysicsBody>();
   private readonly partRuntimeReferences = new Map<BodyHandle, PartRuntimeReference>();
+  private readonly colliderGeometries = new Map<number, Geometry>();
   private readonly colliderRuntimeReferences = new Map<number, PartRuntimeReference>();
   private readonly stepScopedForceBodies = new Set<RAPIER.RigidBody>();
   private readonly stepForceInputs = new Map<RAPIER.RigidBody, StepForceInput[]>();
@@ -335,7 +338,8 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     if (spec.friction !== undefined) collider.setFriction(spec.friction);
     collider.setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
       .setContactForceEventThreshold(0);
-    this.world.createCollider(collider, body);
+    const createdCollider = this.world.createCollider(collider, body);
+    this.colliderGeometries.set(createdCollider.handle, { kind: 'box', halfExtents: spec.halfExtents });
     const handle = this.nextHandle++;
     this.bodies.set(handle, body);
     if (!spec.dynamic) this.staticWorldBoxHandles.add(handle);
@@ -537,6 +541,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       const reference = { runtimeBody, partId: part.id };
       this.partRuntimeReferences.set(partHandles.get(part.id)!, reference);
       this.colliderRuntimeReferences.set(partColliders.get(part.id)!.handle, reference);
+      this.colliderGeometries.set(partColliders.get(part.id)!.handle, part.geometry);
     }
     return physicsBody;
   }
@@ -613,7 +618,10 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     for (const [partId, handle] of removedHandles) {
       const part = this.bodies.get(handle)!;
       const collider = runtimeBody.partColliders.get(partId);
-      if (collider) this.colliderRuntimeReferences.delete(collider.handle);
+      if (collider) {
+        this.colliderRuntimeReferences.delete(collider.handle);
+        this.colliderGeometries.delete(collider.handle);
+      }
       this.partRuntimeReferences.delete(handle);
       this.stepScopedForceBodies.delete(part);
       this.stepForceInputs.delete(part);
@@ -1001,7 +1009,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
       for (const connection of runtimeBody.connections.values()) connection.supportTorqueWorld = undefined;
       for (const partId of runtimeBody.latestPartImpulses.keys()) runtimeBody.latestPartImpulses.set(partId, 0);
       for (const partId of runtimeBody.latestPartAppliedImpulses.keys()) runtimeBody.latestPartAppliedImpulses.set(partId, 0);
-      for (const partId of runtimeBody.latestPartContactLoads.keys()) runtimeBody.latestPartContactLoads.set(partId, { impulseNs: 0, forceN: 0 });
+      for (const partId of runtimeBody.latestPartContactLoads.keys()) runtimeBody.latestPartContactLoads.set(partId, { impulseNs: 0, forceN: 0, pressurePa: 0, peakPressurePa: 0, patches: [] });
       for (const contacts of runtimeBody.latestContacts.values()) contacts.length = 0;
     }
     // Resolve declared passive springs from their physical stiffness/inertia.
@@ -1058,7 +1066,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
           const { runtimeBody, partId } = reference;
           const previous = runtimeBody.latestPartContactLoads.get(partId)!;
           runtimeBody.latestPartContactLoads.set(partId, {
-            impulseNs: previous.impulseNs + impulse,
+            ...previous, impulseNs: previous.impulseNs + impulse,
             forceN: 0,
           });
           runtimeBody.latestPartImpulses.set(
@@ -1067,6 +1075,54 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
           );
         }
       });
+
+      // Normal solver impulses are a separate local-pressure measurement.
+      // One manifold owns one area, regardless of its number of contact points.
+      for (const runtimeBody of this.activeRuntimeBodies) {
+        for (const [partId, collider] of runtimeBody.partColliders) {
+          const patches: ContactPatch[] = [];
+          this.world.contactPairsWith(collider, other => {
+            const ownGeometry = this.colliderGeometries.get(collider.handle)!;
+            const otherGeometry = this.colliderGeometries.get(other.handle);
+            if (!otherGeometry) return;
+            const otherReference = this.colliderRuntimeReferences.get(other.handle);
+            this.world.contactPair(collider, other, (manifold, flipped) => {
+              const normal = scale(manifold.normal(), flipped ? -1 : 1);
+              let impulseNs = 0;
+              let weightedPoint: Vector3 = { x: 0, y: 0, z: 0 };
+              for (let i = 0; i < manifold.numContacts(); i++) {
+                const impulse = Math.max(0, manifold.contactImpulse(i));
+                const local = flipped ? manifold.localContactPoint2(i) : manifold.localContactPoint1(i);
+                if (!local || impulse === 0) continue;
+                const worldPoint = add(collider.translation(), rotate(local, collider.rotation()));
+                impulseNs += impulse;
+                weightedPoint = add(weightedPoint, scale(worldPoint, impulse));
+              }
+              if (impulseNs <= 0) return; // Exclude unloaded/speculative contact.
+              const localNormal = (shape: RAPIER.Collider, n: Vector3) => {
+                const q = shape.rotation();
+                return rotate(n, { x: -q.x, y: -q.y, z: -q.z, w: q.w });
+              };
+              const effectiveAreaM2 = Math.min(
+                estimateContactAreaM2(ownGeometry, localNormal(collider, normal)),
+                estimateContactAreaM2(otherGeometry, localNormal(other, scale(normal, -1))),
+              );
+              const forceN = impulseNs/substepSeconds;
+              patches.push({ point: scale(weightedPoint, 1/impulseNs), normal, impulseNs, forceN,
+                effectiveAreaM2, pressurePa: forceN/effectiveAreaM2, seconds: substepSeconds,
+                ...(otherReference ? { otherEntityId: otherReference.runtimeBody.entityId,
+                  otherPartId: otherReference.partId } : {}) });
+            });
+          });
+          const previous = runtimeBody.latestPartContactLoads.get(partId)!;
+          const maximumPressure = patches.reduce((max, patch) => Math.max(max, patch.pressurePa), 0);
+          runtimeBody.latestPartContactLoads.set(partId, { ...previous,
+            patches: [...previous.patches ?? [], ...patches],
+            pressurePa: (previous.pressurePa ?? 0) + maximumPressure/substepCount,
+            peakPressurePa: Math.max(previous.peakPressurePa ?? 0, maximumPressure),
+          });
+        }
+      }
 
       if (substep === substepCount - 1) {
         // Contact geometry/point impulses are snapshots from the final solver
@@ -1109,7 +1165,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     for (const runtimeBody of this.activeRuntimeBodies) {
       for (const [partId, load] of runtimeBody.latestPartContactLoads) {
         runtimeBody.latestPartContactLoads.set(partId, {
-          impulseNs: load.impulseNs,
+          ...load, impulseNs: load.impulseNs,
           forceN: load.impulseNs / seconds,
         });
       }

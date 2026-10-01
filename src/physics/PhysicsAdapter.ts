@@ -1,3 +1,4 @@
+import type { ContactPatch } from '../core/contact';
 import type { Entity, Pose, Quaternion, Vector3 } from '../core/model';
 import type { PhysicsBody } from './PhysicsBody';
 
@@ -24,6 +25,12 @@ export interface PhysicalContact {
 export interface PartContactLoad {
   readonly impulseNs: number;
   readonly forceN: number;
+  /** Loaded manifold samples from this outer tick; each owns its substep duration. */
+  readonly patches?: readonly ContactPatch[];
+  /** Time average of the strongest local pressure in each substep (Pa). */
+  readonly pressurePa?: number;
+  /** Maximum local substep pressure (Pa). */
+  readonly peakPressurePa?: number;
 }
 
 export interface ConnectionLoad {
@@ -88,7 +95,7 @@ export interface PhysicsAdapter {
   readPartAppliedImpulse(body: PhysicsBody, partId: string): number;
   /** Actual narrow-phase contacts from the last completed step, excluding applied free impulses. */
   readPartContacts(body: PhysicsBody, partId: string): readonly PhysicalContact[];
-  /** Contact-force events only; excludes freely applied test impulses. */
+  /** Contact-force event totals and solver-normal pressure; excludes free impulses. */
   readPartContactLoad(body: PhysicsBody, partId: string): PartContactLoad;
   /** Estimated load at a live structural connection from the most recent completed step. */
   readConnectionLoad(body: PhysicsBody, connectionId: string): ConnectionLoad;

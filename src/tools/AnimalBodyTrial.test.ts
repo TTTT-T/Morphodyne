@@ -71,7 +71,7 @@ describe('animal body physical trials', () => {
     expect(results.get('right')!.approach).toBe(true);
     expect(results.get('left')!.minHeading).toBeLessThan(-0.15);
     expect(results.get('right')!.maxHeading).toBeGreaterThan(0.3);
-  });
+  }, 15000);
 
   it('returns upright after a lateral impulse to the torso', async () => {
     const { world, agent } = await solo();

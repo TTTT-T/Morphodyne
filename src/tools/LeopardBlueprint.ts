@@ -13,6 +13,8 @@ import type {
 export interface LeopardBlueprintOptions {
   /** Facing direction in the arena. Defaults to +X. */
   readonly facing?: 1 | -1;
+  /** Structural comparison only: same mass/material/actuator, wider contact blocks. */
+  readonly contactGeometry?: 'toothed' | 'blunt';
 }
 
 /** Body-owned mechanical values shared with the motor's two-link model. */
@@ -73,9 +75,16 @@ const contactMaterial: Material = {
 /** A separately modeled cranial material can fail under repeated real head contact. */
 const headMaterial: Material = {
   id: 'leopard-head-material', density: 650, friction: 0.9, restitution: 0.03,
+  yieldPressurePa: 20e6, ultimatePressurePa: 80e6,
   yieldImpulseNs: 1.2, toughnessImpulseNs: 7.0,
   yieldForceN: 500, ultimateForceN: 1200,
   yieldTorqueNm: 100, ultimateTorqueNm: 300,
+};
+
+const hardContactMaterial: Material = {
+  id: 'dense-contact-material', density: 2000, friction: 0.9, restitution: 0.02,
+  yieldImpulseNs: 4, toughnessImpulseNs: 20, yieldForceN: 1600, ultimateForceN: 4000,
+  yieldPressurePa: 40e6, ultimatePressurePa: 100e6,
 };
 
 interface ConnectionLoad {
@@ -288,7 +297,7 @@ function contactSensor(
 }
 
 /**
- * Build the reusable 20-Part physical Leopard body.
+ * Build the reusable 24-Part physical Leopard body.
  *
  * The Blueprint contains no animal-specific Core types or outcome shortcuts.
  * It is an ordinary articulated structure: a low torso, four jointed legs,
@@ -376,6 +385,23 @@ export function createLeopardBlueprint(options: LeopardBlueprintOptions = {}): B
     );
   }
 
+  for (const level of ['upper', 'lower'] as const) for (const side of [-1, 1] as const) {
+    const id = `leopard-${level}-${side === -1 ? 'left' : 'right'}-tooth`;
+    const parent = level === 'upper' ? 'leopard-head' : 'leopard-jaw';
+    const local = level === 'upper' ? vector(0.315, -0.07, side*0.16) : vector(0.125, 0.095, side*0.12);
+    const parentPart = parts.find(part => part.id === parent)!;
+    const position = level === 'upper' ? vector(1.925, 1.21, side*0.16)
+      : vector(1.8 + local.x, 1.0 + local.y, local.z);
+    const geometry: Part['geometry'] = options.contactGeometry === 'blunt'
+      ? { kind:'box', halfExtents:vector(0.06,0.037,0.035) }
+      : { kind:'capsule', radius:0.012, halfHeight:0.025 };
+    parts.push({ ...makePart(facing, id, hardContactMaterial.id, geometry, position, 0.03),
+      pose: { position:facingPosition(position, facing), rotation:parentPart.pose.rotation } });
+    connections.push(rigid(`${id}-mount`, parent, id, local, vector(0,0,0), {
+      strengthImpulseNs:20, yieldForceN:1000, ultimateForceN:3000, yieldTorqueNm:20, ultimateTorqueNm:60,
+    }));
+  }
+
   const actuators: JointActuator[] = [];
   for (const leg of legs) {
     actuators.push(
@@ -417,6 +443,12 @@ export function createLeopardBlueprint(options: LeopardBlueprintOptions = {}): B
     contactSensor('leopard-head-contact', 'leopard-head', 0.5, vector(1, 0, 0)),
     contactSensor('leopard-jaw-contact', 'leopard-jaw', 0.4, vector(1, 0, 0)),
     {
+      id: 'leopard-mouth-range', kind: 'range', partId: 'leopard-head',
+      localPose: localPose(0.08,-0.23,0), forward: vector(1,-0.4,0),
+      updatePeriodTicks:1, noise:{standardDeviation:0}, latencyTicks:0,
+      range:0.6, fieldOfViewRadians:Math.PI/3, resolution:5,
+    },
+    {
       id: 'leopard-head-range',
       kind: 'range',
       partId: 'leopard-head',
@@ -433,7 +465,7 @@ export function createLeopardBlueprint(options: LeopardBlueprintOptions = {}): B
 
   return {
     id: 'leopard-blueprint',
-    materials: [bodyMaterial, limbMaterial, contactMaterial, headMaterial],
+    materials: [bodyMaterial, limbMaterial, contactMaterial, headMaterial, hardContactMaterial],
     parts,
     connections,
     actuators,

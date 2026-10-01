@@ -30,6 +30,9 @@ export interface Material {
   /** Sustained-force yield/ultimate thresholds. Omitted capacities are unbounded. */
   readonly yieldForceN?: number;
   readonly ultimateForceN?: number;
+  /** Optional local compressive pressure capacities in Pa (N/m²). */
+  readonly yieldPressurePa?: number;
+  readonly ultimatePressurePa?: number;
   /** Sustained-torque yield/ultimate thresholds. Omitted capacities are unbounded. */
   readonly yieldTorqueNm?: number;
   readonly ultimateTorqueNm?: number;
@@ -308,10 +311,11 @@ export function validateBlueprint(blueprint: Blueprint): string[] {
     if (material.toughnessImpulseNs !== undefined && (!Number.isFinite(material.toughnessImpulseNs) || material.toughnessImpulseNs <= 0)) {
       errors.push(`Invalid toughnessImpulseNs: ${material.id}`);
     }
-    for (const field of ['yieldForceN', 'ultimateForceN', 'yieldTorqueNm', 'ultimateTorqueNm'] as const) {
+    for (const field of ['yieldForceN', 'ultimateForceN', 'yieldTorqueNm', 'ultimateTorqueNm', 'yieldPressurePa', 'ultimatePressurePa'] as const) {
       const value = material[field];
       if (value !== undefined && (!Number.isFinite(value) || value <= 0)) errors.push(`Invalid ${field}: ${material.id}`);
     }
+    if (material.yieldPressurePa !== undefined && material.ultimatePressurePa !== undefined && material.yieldPressurePa >= material.ultimatePressurePa) errors.push(`Invalid pressure thresholds: ${material.id}`);
     if (material.yieldForceN !== undefined && material.ultimateForceN !== undefined && material.yieldForceN >= material.ultimateForceN) errors.push(`Invalid force thresholds: ${material.id}`);
     if (material.yieldTorqueNm !== undefined && material.ultimateTorqueNm !== undefined && material.yieldTorqueNm >= material.ultimateTorqueNm) errors.push(`Invalid torque thresholds: ${material.id}`);
   }

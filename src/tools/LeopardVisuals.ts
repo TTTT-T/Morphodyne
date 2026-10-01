@@ -122,9 +122,6 @@ const leopardJaw: PartVisual = { pieces: [
   box(v(0.42, 0.06, 0.30), v(0.11, -0.025, 0), palette.bodyLight),
   box(v(0.34, 0.016, 0.28), v(0.15, 0.042, 0), palette.spots),
   sphere(0.025, v(0.31, -0.01, 0), palette.nose),
-  // These tiny teeth are presentation hints only and sit inside the jaw Part.
-  cone(0.012, 0.038, v(0.28, 0.03, -0.064), palette.claw),
-  cone(0.012, 0.038, v(0.28, 0.03, 0.064), palette.claw),
 ] };
 
 function tailVisual(radius: number, depth: number, stripeX: number): PartVisual {
@@ -197,10 +194,15 @@ export const LEOPARD_PART_IDS = [
   'leopard-front-right-upper', 'leopard-front-right-lower', 'leopard-front-right-paw',
   'leopard-hind-left-upper', 'leopard-hind-left-lower', 'leopard-hind-left-paw',
   'leopard-hind-right-upper', 'leopard-hind-right-lower', 'leopard-hind-right-paw',
+  'leopard-upper-left-tooth', 'leopard-upper-right-tooth', 'leopard-lower-left-tooth', 'leopard-lower-right-tooth',
 ] as const;
 
 /** Rendering-only lookup. Part pose and all separation behavior remain physical. */
 export function leopardPartVisual(partId: string): PartVisual | undefined {
+  if (/^leopard-(upper|lower)-(left|right)-tooth$/.test(partId)) {
+    return { pieces: [cylinder(0.012, 0.05, v(0,0,0), palette.claw),
+      sphere(0.012, v(0,0.025,0), palette.claw), sphere(0.012, v(0,-0.025,0), palette.claw)] };
+  }
   switch (partId) {
     case 'leopard-chest': return leopardChest;
     case 'leopard-pelvis': return leopardPelvis;

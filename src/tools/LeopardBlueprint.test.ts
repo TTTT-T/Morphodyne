@@ -12,15 +12,16 @@ const expectedPartIds = [
   'leopard-front-right-upper', 'leopard-front-right-lower', 'leopard-front-right-paw',
   'leopard-hind-left-upper', 'leopard-hind-left-lower', 'leopard-hind-left-paw',
   'leopard-hind-right-upper', 'leopard-hind-right-lower', 'leopard-hind-right-paw',
+  'leopard-upper-left-tooth', 'leopard-upper-right-tooth', 'leopard-lower-left-tooth', 'leopard-lower-right-tooth',
 ];
 
 describe('LeopardBlueprint', () => {
-  it('builds a valid 20-Part generic articulated body with required channels', () => {
+  it('builds a valid 24-Part generic articulated body with required channels', () => {
     const blueprint = createLeopardBlueprint();
 
     expect(validateBlueprint(blueprint)).toEqual([]);
     expect(blueprint.parts.map((part) => part.id)).toEqual(expectedPartIds);
-    expect(blueprint.parts).toHaveLength(20);
+    expect(blueprint.parts).toHaveLength(24);
     expect(blueprint.parts.every((part) => part.mass !== undefined && part.mass > 0)).toBe(true);
 
     const requiredActuators = [

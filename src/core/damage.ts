@@ -58,6 +58,10 @@ export interface PartLoad {
   readonly partId: string;
   readonly impulseNs: number;
   readonly forceN?: number;
+  /** Outer-step mean of the maximum local contact pressure (Pa). */
+  readonly pressurePa?: number;
+  /** Maximum substep pressure for instantaneous ultimate failure (Pa). */
+  readonly peakPressurePa?: number;
   readonly seconds?: number;
   readonly tick?: number;
 }
@@ -75,6 +79,8 @@ export interface DamageEvent {
   readonly impulseNs: number;
   readonly forceN?: number;
   readonly torqueNm?: number;
+  readonly pressurePa?: number;
+  readonly peakPressurePa?: number;
   readonly seconds?: number;
   readonly tick?: number;
   readonly previousState: DamageCondition;
@@ -149,11 +155,12 @@ function channelUltimate(connection: Connection, from: Material, to: Material, c
 }
 
 function evolveSustained(current: DamageState, force: number, torque: number, seconds: number,
-  forceYieldN: number, torqueYieldNm: number, forceUltimateN: number, torqueUltimateNm: number): DamageState {
-  const ultimate = force >= forceUltimateN || torque >= torqueUltimateNm;
+  forceYieldN: number, torqueYieldNm: number, forceUltimateN: number, torqueUltimateNm: number,
+  pressure = 0, peakPressure = pressure, pressureYield = Infinity, pressureUltimate = Infinity): DamageState {
+  const ultimate = force >= forceUltimateN || torque >= torqueUltimateNm || peakPressure >= pressureUltimate;
   const forceRatio = Number.isFinite(forceYieldN) ? force / forceYieldN : 0;
   const torqueRatio = Number.isFinite(torqueYieldNm) ? torque / torqueYieldNm : 0;
-  const increment = seconds * Math.max(0, forceRatio - 1, torqueRatio - 1);
+  const increment = seconds * Math.max(0, forceRatio - 1, torqueRatio - 1, pressure / pressureYield - 1);
   const accumulatedOverloadSeconds = Math.min(1, (current.accumulatedOverloadSeconds ?? 0) + increment);
   const fractured = ultimate || current.state === 'fractured' || current.state === 'separated' || accumulatedOverloadSeconds >= 1;
   if (fractured) return { ...current, state: 'fractured', integrity: 0, deformation: 1, accumulatedOverloadSeconds };
@@ -531,17 +538,23 @@ export function applyPartLoad(state: StructuralDamageState, blueprint: Blueprint
   if (load.seconds !== undefined && (!Number.isFinite(load.seconds) || load.seconds < 0)) throw new RangeError('Part duration must be finite and non-negative');
   if (load.forceN !== undefined && (!Number.isFinite(load.seconds) || (load.seconds ?? 0) <= 0)) throw new RangeError('Part force requires positive seconds');
   if (load.tick !== undefined && !Number.isFinite(load.tick)) throw new RangeError('Part tick must be finite');
+  for (const pressure of [load.pressurePa, load.peakPressurePa]) {
+    if (pressure !== undefined && (!Number.isFinite(pressure) || pressure < 0)) throw new RangeError('Part pressure must be finite and non-negative');
+    if (pressure !== undefined && (!Number.isFinite(load.seconds) || (load.seconds ?? 0) <= 0)) throw new RangeError('Part pressure requires positive seconds');
+  }
   const current = getPartState(state, load.partId);
-  if (current.damage.state === 'fractured' || (load.impulseNs === 0 && !(load.forceN && load.forceN > 0))) return { state, events: [], part: current };
+  if (current.damage.state === 'fractured' || (load.impulseNs === 0 && !(load.forceN && load.forceN > 0) && !(load.peakPressurePa || load.pressurePa))) return { state, events: [], part: current };
   const material = materialFor(blueprint, current.materialId);
   // Older Blueprints without an explicit material contact capacity remain
   // physically present and do not acquire a new implicit brittle threshold.
   if (material.yieldImpulseNs === undefined && material.toughnessImpulseNs === undefined
-    && material.yieldForceN === undefined && material.ultimateForceN === undefined) {
+    && material.yieldForceN === undefined && material.ultimateForceN === undefined
+    && material.yieldPressurePa === undefined && material.ultimatePressurePa === undefined) {
     return { state, events: [], part: current };
   }
   const sustained = evolveSustained(current.damage, load.forceN ?? 0, 0, load.seconds ?? 0,
-    forceYield(material), Number.POSITIVE_INFINITY, forceUltimate(material), Number.POSITIVE_INFINITY);
+    forceYield(material), Number.POSITIVE_INFINITY, forceUltimate(material), Number.POSITIVE_INFINITY,
+    load.pressurePa ?? 0, load.peakPressurePa ?? load.pressurePa ?? 0, material.yieldPressurePa, material.ultimatePressurePa);
   const evolved = evolveDamage(sustained, materialToughness(material), materialYield(material),
     material.yieldImpulseNs !== undefined || material.toughnessImpulseNs !== undefined ? load.impulseNs : 0,
     current.residualLoadCapacityNs, false);
@@ -551,6 +564,7 @@ export function applyPartLoad(state: StructuralDamageState, blueprint: Blueprint
     || next.damage.accumulatedOverloadSeconds !== current.damage.accumulatedOverloadSeconds) {
     events.push({ kind: next.damage.state === 'fractured' ? 'fracture' : 'deformation', target: 'part',
       targetId: load.partId, partId: load.partId, impulseNs: load.impulseNs, forceN: load.forceN,
+      pressurePa: load.pressurePa, peakPressurePa: load.peakPressurePa,
       seconds: load.seconds, tick: load.tick, previousState: current.damage.state, state: next.damage.state,
       integrity: next.damage.integrity, residualLoadCapacityNs: next.residualLoadCapacityNs });
   }
