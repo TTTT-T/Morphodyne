@@ -49,4 +49,4 @@
 
 架构偏离：无。World/Construction 管生命周期，控制请求走既有 manual source，结果完全由现有物理规则产生；无夹持锚定、抬升补偿或语义能力开关。
 
-提交及 PR：本报告随 `codex/playable-lab-v0.1` 的交付提交推送；PR 描述记录具体提交与本报告链接。停在独立验收边界。
+实现提交：`85624ea`（feat: deliver playable lab experiment and design workflow）。分支已推送。PR：[#22](https://github.com/TTTT-T/Morphodyne/pull/22)，目标 `main`，保持 OPEN，停在独立验收边界。报告交付信息以本次文档提交补齐。
