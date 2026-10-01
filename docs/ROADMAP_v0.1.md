@@ -467,3 +467,8 @@ Only then should the project seriously expand into areas such as:
 - larger worlds
 
 The foundation must be proven before content scale is increased.
+
+
+## Authorized continuation — Body Contact Learning v0.1 (2026-10-01)
+
+Following accepted World/Construction/Environment, material damage and Playable Lab work, resume only bounded embodied contact-skill learning under `BODY_CONTACT_LEARNING_V01_KICKOFF.md`. Establish fixed-strategy failures, then freeze measurable local-skill gates before training. Separate training/test offsets, compare learning-enabled with frozen control, validate the same sensor feedback on a non-animal articulated mechanism, then attempt disturbance and two-animal integration without guaranteed outcomes. Unrelated Brain/planner/gait/RL/LLM/social expansion remains frozen.

@@ -102,6 +102,8 @@ The development center now returns to:
 
 **World → Structure → Construction → Environment → Interaction.**
 
+After Phase 14 and accepted Playable Lab v0.1 (2026-10-01), explicit user authorization permits the bounded Body Contact Learning v0.1 experiment: anonymous sensor-driven short-chain contact control, finite parameter search and experience, and controlled held-out validation. The historical freeze still applies to unrelated planning, whole-body RL, LLM, social behavior and gait expansion. This exception does not change World-first ownership or physics authority; see `BODY_CONTACT_LEARNING_V01_KICKOFF.md`.
+
 ---
 
 ## 3. Technical direction

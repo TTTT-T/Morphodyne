@@ -4,6 +4,8 @@ import { ConstructionRuntime } from '../simulation/ConstructionRuntime';
 import { WorldRuntime } from '../simulation/WorldRuntime';
 import { ArenaObserver } from './ArenaObserver';
 import { LeopardAgentRuntime } from './LeopardAgent';
+import {ContactSkillRuntime} from '../simulation/ContactSkillRuntime';
+import {withBodyContactSensors,bodyContactBinding,withFrontContactParts} from './BodyContactBinding';
 import { createLeopardBlueprint } from './LeopardBlueprint';
 
 const arenaEnvironment: EnvironmentSpec = {
@@ -27,10 +29,11 @@ export interface ArenaSession {
   readonly construction: ConstructionRuntime;
   readonly agents: ReadonlyMap<string, LeopardAgentRuntime>;
   readonly observer: ArenaObserver;
+  dispose():void;
 }
 
 /** A fresh PhysicsAdapter and WorldRuntime also reset tick, energy, damage, and issued IDs. */
-export async function createArenaSession(): Promise<ArenaSession> {
+export async function createArenaSession(contactParameters?: readonly number[],frontContact=false): Promise<ArenaSession> {
   const physics = await RapierPhysicsAdapter.create();
   const world = new WorldRuntime(physics, arenaEnvironment);
   const construction = new ConstructionRuntime(world);
@@ -38,14 +41,18 @@ export async function createArenaSession(): Promise<ArenaSession> {
   for (const [id, x, z, facing] of [
     ['leopard-a', -2.3, 0, 1], ['leopard-b', 2.3, 0.6, -1],
   ] as const) {
-    const agent = new LeopardAgentRuntime();
+    const accepted = createLeopardBlueprint({ facing });
+    const original = frontContact?withFrontContactParts(accepted):accepted;
+    const blueprint=contactParameters?withBodyContactSensors(original):original;
+    const contact=contactParameters?new ContactSkillRuntime(bodyContactBinding(blueprint),contactParameters):undefined;
+    const agent = new LeopardAgentRuntime('traction',{},undefined,contact);
     agents.set(id, agent);
-    construction.spawn({ id, blueprint: createLeopardBlueprint({ facing }) }, {
+    construction.spawn({ id, blueprint }, {
       origin: { x, y: 0, z },
       energy: { capacityJ: 12000, maxPowerWatts: 650, efficiency: 0.82 },
       agent: { control: (seconds) => agent.control(world.readSensorRuntime(id)?.readAgentView()
         ?? { tick: -1, perceptions: [] }, seconds) },
     });
   }
-  return { world, construction, agents, observer: new ArenaObserver(agents) };
+  return { world, construction, agents, observer: new ArenaObserver(agents),dispose:()=>physics.dispose() };
 }
