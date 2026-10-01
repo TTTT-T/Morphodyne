@@ -1,12 +1,21 @@
 import {expect,it} from 'vitest';
 import {
  CONTACT_INITIAL_PARAMETERS,CONTACT_TEST_OFFSETS,contactTestDisturbances,
- runContactTrial,trainContactSkill,trainDisturbedContact,
+ createContactLearningTrial,runContactTrial,trainContactSkill,trainDisturbedContact,
 } from './ContactLearningTrial';
 import {runContactArenaExperiment} from './ContactArenaExperiment';
 const mean=(values:readonly number[])=>values.reduce((a,b)=>a+b,0)/values.length;
 const success=(row:Awaited<ReturnType<typeof runContactTrial>>)=>row.longestBilateralTicks>=30;
 const recovered=(row:Awaited<ReturnType<typeof runContactTrial>>)=>row.postLongestBilateralTicks>=30&&row.recoveryTicks>=0&&row.recoveryTicks<=60;
+it('runs the mechanical contact fixture as a sensor-bearing machine without an Agent',async()=>{
+ const trial=await createContactLearningTrial('machine',{x:0,y:0,z:0},CONTACT_INITIAL_PARAMETERS);
+ try{
+  expect(trial.world.inspectEntity('chain')!.agentPresent).toBe(false);
+  trial.step();trial.step();
+  expect(trial.world.readSensorRuntime('chain')!.readAgentView().perceptions.length).toBeGreaterThan(0);
+  expect(trial.skill.inspect().feedbackTicks).toBeGreaterThan(0);
+ }finally{trial.physics.dispose();}
+});
 it('learns the same sensor contact mechanism on a non-Agent mechanical chain',async()=>{
  const learned=await trainContactSkill('machine');
  const baseline=[],trained=[];

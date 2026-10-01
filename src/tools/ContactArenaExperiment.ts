@@ -1,4 +1,6 @@
 import {createArenaSession} from './ArenaSession';
+import type { ContactPatch } from '../core/contact';
+import { hasSimultaneousContact } from './contactMeasurement';
 /** External measurements only. None of these reads are supplied to the controllers. */
 export async function runContactArenaExperiment(parameters?:readonly number[],frontContact=false,ticks=600){
  const session=await createArenaSession(parameters,frontContact);const {world,agents}=session;
@@ -15,7 +17,7 @@ export async function runContactArenaExperiment(parameters?:readonly number[],fr
     const view=world.readSensorRuntime(id)?.readAgentView();
     const joints=new Set(view?.perceptions.filter(p=>p.channel==='joint').map(p=>p.ownConnectionId));
     const usable=joints.has('leopard-neck-joint')&&joints.has('leopard-jaw-joint');
-    const sides=new Set<string>();
+    const sides: [ContactPatch[], ContactPatch[]]=[[],[]];
     const agent=agents.get(id)!.inspect();stability[agent.stability]=(stability[agent.stability]??0)+1;
     for(const part of world.readBlueprint(id).parts.filter(p=>p.id.endsWith('-tooth'))){
      for(const patch of world.readPartContactLoad(id,part.id)?.patches??[]){
@@ -23,10 +25,10 @@ export async function runContactArenaExperiment(parameters?:readonly number[],fr
       rawLoaded=true;rawPeakPressurePa=Math.max(rawPeakPressurePa,patch.pressurePa);
       if(!usable || !connected.has(part.id) || patch.forceN<=.1)continue;
       loaded=true;peakPressurePa=Math.max(peakPressurePa,patch.pressurePa);
-      sides.add(part.id.includes('-upper-')?'upper':'lower');
+      sides[part.id.includes('-upper-')?0:1].push(patch);
      }
     }
-    const ownBilateral=sides.size===2;
+    const ownBilateral=hasSimultaneousContact(sides[0],sides[1]);
     const ownStreak=ownBilateral?(streaks.get(id)??0)+1:0;streaks.set(id,ownStreak);longest=Math.max(longest,ownStreak);
     bilateral ||= ownBilateral;
    }

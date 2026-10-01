@@ -538,7 +538,11 @@ v0.1:
 
 PhysicsAdapter measures backend-neutral `ContactPatch` samples: world point and
 outward normal, normal impulse (N·s), substep-average normal force (N), effective
-area (m²), pressure (Pa), and sample duration (s). One loaded manifold owns one
+area (m²), pressure (Pa), and sample duration (s). Rapier also records each
+sample's start offset within the outer tick, so external bilateral-contact
+measurements require overlapping physical intervals rather than combining
+alternating unilateral substeps. This metadata does not alter solver forces or
+enter Agent observations. One loaded manifold owns one
 area; unloaded speculative contacts do not produce pressure. The first area
 proxy uses a 1 mm geometry support layer projected onto the tangent plane, with
 analytical rounded-shape approximations and the smaller footprint of the two

@@ -1128,6 +1128,7 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
               const forceN = impulseNs/substepSeconds;
               patches.push({ point: scale(weightedPoint, 1/impulseNs), normal, impulseNs, forceN,
                 effectiveAreaM2, pressurePa: forceN/effectiveAreaM2, seconds: substepSeconds,
+                sampleOffsetSeconds: substep * substepSeconds,
                 ...(otherReference ? { otherEntityId: otherReference.runtimeBody.entityId,
                   otherPartId: otherReference.partId } : {}) });
             });

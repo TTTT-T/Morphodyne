@@ -5,6 +5,7 @@ import { ContactSkillRuntime, type ContactSkillBinding } from '../simulation/Con
 import { createLeopardBlueprint } from './LeopardBlueprint';
 import { LeopardAgentRuntime } from './LeopardAgent';
 import {withBodyContactSensors,bodyContactBinding,withFrontContactParts} from './BodyContactBinding';
+import { hasSimultaneousContact } from './contactMeasurement';
 
 const v = (x=0,y=0,z=0): Vector3 => ({x,y,z});
 const rotation = {x:0,y:0,z:0,w:1};
@@ -64,7 +65,12 @@ export async function createContactLearningTrial(kind:ContactTrialKind,offset:Co
   const support=kind.endsWith('free-body')?new LeopardAgentRuntime('traction',{}, {evaluate:()=>({goal:{kind:'maintain-stability',desiredState:'hold posture while using a local chain'},affordance:{id:'posture',goalKind:'maintain-stability',skill:'stand'}})}):undefined;
   const ownBinding=binding(kind);
   const skill=new ContactSkillRuntime(ownBinding,parameters);
-  world.spawn({id:'chain',blueprint},{energy:{capacityJ:12000,maxPowerWatts:650,efficiency:0.82},agent:{control:(seconds)=>{const view=world.readSensorRuntime('chain')?.readAgentView()??{tick:-1,perceptions:[]};return [...(support?.control(view,seconds)??[]).filter(s=>s.actuatorId!=='leopard-neck-pitch'&&s.actuatorId!=='leopard-jaw-close'),...skill.update(view)];}}});
+  const control = (seconds:number) => {
+    const view=world.readSensorRuntime('chain')?.readAgentView()??{tick:-1,perceptions:[]};
+    return [...(support?.control(view,seconds)??[]).filter(s=>s.actuatorId!=='leopard-neck-pitch'&&s.actuatorId!=='leopard-jaw-close'),...skill.update(view)];
+  };
+  world.spawn({id:'chain',blueprint},{energy:{capacityJ:12000,maxPowerWatts:650,efficiency:0.82},
+    ...(kind==='machine'?{control}:{agent:{control}})});
   const center=kind==='machine'?v(0.25,1.35):v(1.925,1.15);
   if(!empty)world.spawn({id:'sample',blueprint:{id:'independent-sample',materials:[material],parts:[part('sample',kind==='machine'?box(0.12,0.045,0.13):box(0.045,0.02,0.22),v(center.x+offset.x,center.y+offset.y,offset.z),0.1)],connections:[]}});
   const opposed=kind==='machine'?[['upper-tip'],['lower-tip']]:[blueprint.parts.filter(p=>p.id.includes('-upper-')&&p.id.endsWith('-tooth')).map(p=>p.id),blueprint.parts.filter(p=>p.id.includes('-lower-')&&p.id.endsWith('-tooth')).map(p=>p.id)];
@@ -74,9 +80,9 @@ export async function createContactLearningTrial(kind:ContactTrialKind,offset:Co
     const connected=new Set(world.inspectComponent('chain')?.partIds??[]);
     const joints=world.readSensorRuntime('chain')?.readAgentView().perceptions.filter(p=>p.channel==='joint').map(p=>p.ownConnectionId)??[];
     const controllable=ownBinding.axes.every(a=>joints.includes(a.connectionId));
-    const sides=opposed.map(ids=>controllable&&patches.some(p=>p.otherEntityId==='chain'&&ids.includes(p.otherPartId??'')&&connected.has(p.otherPartId??'')&&p.forceN>0.1));
-    any+=Number(sides.some(Boolean));
-    const hit=sides.every(Boolean);bilateral+=Number(hit);streak=hit?streak+1:0;longest=Math.max(longest,streak);
+    const sides=opposed.map(ids=>controllable?patches.filter(p=>p.otherEntityId==='chain'&&ids.includes(p.otherPartId??'')&&connected.has(p.otherPartId??'')&&p.forceN>0.1):[]);
+    any+=Number(sides.some(side=>side.length>0));
+    const hit=hasSimultaneousContact(sides[0],sides[1]);bilateral+=Number(hit);streak=hit?streak+1:0;longest=Math.max(longest,streak);
     if(disturbance && world.tick>disturbance.tick){
       postStreak=hit?postStreak+1:0;postLongest=Math.max(postLongest,postStreak);
       if(postStreak===30 && firstRecovery<0)firstRecovery=world.tick-disturbance.tick-30;
